@@ -99,7 +99,7 @@ const Dashboard = () => {
 
   return (
     <div>
-      <div className="flex justify-between align-center mb-6">
+      <div className="flex justify-between align-center mb-6 dashboard-header">
         <div>
           <h1 className="page-title" style={{marginBottom: '0'}}>Good Morning, {appSettings?.husbandName || 'Alex'}! 👋</h1>
           <p className="text-secondary">Here's what's happening with your finances today.</p>
@@ -164,7 +164,7 @@ const Dashboard = () => {
            <div className="flex justify-between align-center mb-4">
              <h3 style={{fontSize: '1rem', margin: 0}}>Expenses by Category</h3>
            </div>
-           <div className="flex align-center gap-4">
+           <div className="flex align-center gap-4 chart-layout">
              <div style={{width: '50%', height: 200}}>
                 {categoryData.length > 0 ? (
                   <ResponsiveContainer>
