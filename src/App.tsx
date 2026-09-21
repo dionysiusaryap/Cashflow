@@ -4,6 +4,8 @@ import { useAppStore } from './store/useAppStore';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
+import { auth } from './db/firebase';
+import { signOut } from 'firebase/auth';
 
 // Pages
 import Pemasukan from './pages/Pemasukan';
@@ -26,6 +28,19 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  const allowedEmails = ['dionysiusaryap@gmail.com', 'marialaksmiparahita@gmail.com'];
+  if (user.email && !allowedEmails.includes(user.email)) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', textAlign: 'center', padding: '2rem' }}>
+        <h2 style={{color: 'red'}}>Akses Ditolak 🛑</h2>
+        <p>Email <strong>{user.email}</strong> tidak memiliki izin untuk membuka brankas Cashflow ini.</p>
+        <button onClick={() => signOut(auth)} style={{marginTop: '1rem', padding: '0.75rem 1.5rem', background: '#ef4444', color: 'white', border: 'none', borderRadius: '0.5rem', cursor: 'pointer', fontWeight: 600}}>
+          Logout & Gunakan Akun Lain
+        </button>
+      </div>
+    );
   }
 
   return <>{children}</>;
