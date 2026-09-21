@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import type { Category, PaymentMethod } from '../store/useAppStore';
 import { MdAdd, MdDownload, MdUpload, MdWarning, MdEdit, MdDelete, MdArrowUpward, MdArrowDownward } from 'react-icons/md';
+import { auth } from '../db/firebase';
+import { signOut } from 'firebase/auth';
 
 const Pengaturan = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -10,7 +12,8 @@ const Pengaturan = () => {
     updateSettings, addCategory, updateCategory, deleteCategory,
     addPaymentMethod, updatePaymentMethod, deletePaymentMethod,
     addIncome, addExpense, addInstallment,
-    deleteIncome, deleteExpense, deleteInstallment
+    deleteIncome, deleteExpense, deleteInstallment,
+    user
   } = useAppStore();
 
   // Profil Form
@@ -259,6 +262,18 @@ const Pengaturan = () => {
       <div className="grid grid-cols-2 gap-4">
         {/* Kolom Kiri */}
         <div>
+          {/* AKUN */}
+          <div className="card mb-4">
+            <h3 className="mb-4">🔒 Akun</h3>
+            <div className="flex justify-between align-center">
+              <div>
+                <div style={{fontWeight: 600}}>Login dengan Google</div>
+                <div className="text-secondary" style={{fontSize: '0.85rem'}}>{user?.email}</div>
+              </div>
+              <button onClick={() => signOut(auth)} className="btn btn-danger">Logout</button>
+            </div>
+          </div>
+
           {/* PROFIL */}
           <div className="card mb-4">
             <h3 className="mb-4">👨‍👩‍👧 Profil Keluarga</h3>
