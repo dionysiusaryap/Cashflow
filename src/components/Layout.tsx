@@ -1,5 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { MdDashboard, MdAccountBalanceWallet, MdCreditCard, MdAnalytics, MdSettings } from 'react-icons/md';
+import { MdDashboard, MdAccountBalanceWallet, MdCreditCard, MdAnalytics, MdSettings, MdLogout } from 'react-icons/md';
+import { auth } from '../db/firebase';
+import { signOut } from 'firebase/auth';
 const Layout = () => {
   const location = useLocation();
 
@@ -31,6 +33,15 @@ const Layout = () => {
               <span>{item.label}</span>
             </Link>
           ))}
+          <a 
+            href="#" 
+            onClick={(e) => { e.preventDefault(); signOut(auth); }} 
+            className="nav-item text-danger"
+            style={{marginTop: 'auto'}}
+          >
+            <MdLogout />
+            <span>Logout</span>
+          </a>
         </nav>
         
         <div className="sidebar-promo">
