@@ -484,3 +484,65 @@ tbody tr:hover {
 .score-good { background: linear-gradient(135deg, var(--primary-color) 0%, #2563eb 100%); }
 .score-warning { background: linear-gradient(135deg, var(--warning-color) 0%, #d97706 100%); }
 .score-danger { background: linear-gradient(135deg, var(--danger-color) 0%, #dc2626 100%); }
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .app-container {
+    flex-direction: column;
+  }
+  
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    padding: 0.5rem;
+    z-index: 1000;
+    border-top: 1px solid var(--border-color);
+  }
+  
+  .sidebar-logo, .sidebar-promo {
+    display: none;
+  }
+  
+  .sidebar-nav {
+    flex-direction: row;
+    justify-content: space-around;
+  }
+  
+  .nav-item {
+    flex-direction: column;
+    padding: 0.5rem;
+    gap: 0.25rem;
+    font-size: 0.65rem;
+  }
+  
+  .nav-item svg {
+    font-size: 1.5rem;
+  }
+  
+  .main-content {
+    padding: 1rem 1rem 5rem 1rem;
+    height: auto;
+    overflow-y: visible;
+  }
+  
+  .grid-cols-4, .grid-cols-2 {
+    grid-template-columns: 1fr;
+  }
+  
+  .card {
+    padding: 1rem;
+  }
+  
+  .page-title {
+    font-size: 1.5rem;
+  }
+  
+  .data-table, table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}
