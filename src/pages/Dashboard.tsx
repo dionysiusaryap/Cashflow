@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { formatCurrency, calculateHealthScore, getHealthScoreStatus } from '../utils/format';
+import { formatCurrency } from '../utils/format';
 import { getFinancialPeriod, getLast6FinancialPeriods, formatPeriodToMonthYear } from '../utils/dateUtils';
 import { calculateFinancialSummary } from '../utils/financeCalculations';
 import { Link } from 'react-router-dom';
@@ -14,11 +14,6 @@ const COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#64748b'
 const Dashboard = () => {
   const { 
     incomes,
-    totalIncome, 
-    dailyExpenseTotal, 
-    cashFlow,
-    savingRate,
-    totalMonthlyInstallment, 
     expenses, 
     installments,
     categories,
@@ -101,9 +96,6 @@ const Dashboard = () => {
   // Pengeluaran Rutin (Semua Bulan) - HANYA yang tidak menggunakan metode kredit/cicilan
   const recurringExpenses = validDailyExpenses.filter(e => e.date === 'Semua Bulan' && !installmentCategories.has(e.payment_method || ''));
   const totalRecurring = recurringExpenses.reduce((sum, e) => sum + e.amount, 0);
-
-  // Grand Total Tagihan
-  const grandTotalTagihan = groupedBills.reduce((sum, g) => sum + g.total, 0) + totalRecurring;
 
   return (
     <div>
