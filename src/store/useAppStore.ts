@@ -1,20 +1,95 @@
 import { create } from 'zustand';
-import { db, type Income, type Expense, type Installment, type Category, type Budget, type PaymentMethod, type AppSettings } from '../db/database';
 import { calculateFinancialSummary } from '../utils/financeCalculations';
 import { getFinancialPeriod } from '../utils/dateUtils';
-import { liveQuery } from 'dexie';
+import { db, auth } from '../db/firebase';
+import { 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  deleteDoc, 
+  updateDoc,
+  doc
+} from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import type { User } from 'firebase/auth';
+
+// Interfaces
+export interface Income {
+  id?: string;
+  date: string;
+  source: string;
+  owner: 'Suami' | 'Istri' | 'Bersama';
+  amount: number;
+  notes?: string;
+  timestamp: number;
+}
+
+export interface Expense {
+  id?: string;
+  date: string;
+  category: string;
+  payment_method: string;
+  amount: number;
+  description?: string;
+  owner: 'Suami' | 'Istri' | 'Bersama';
+  installment_id?: string;
+  timestamp: number;
+}
+
+export interface Installment {
+  id?: string;
+  name: string;
+  type: string;
+  initial_amount: number;
+  monthly_payment: number;
+  tenor: number;
+  paid_installments: number;
+  remaining_installments: number;
+  outstanding: number;
+  due_date: string;
+  payment_method: string;
+  status: 'Aman' | 'Segera jatuh tempo' | 'Jatuh tempo hari ini' | 'Terlambat' | 'Lunas';
+  notes?: string;
+  timestamp: number;
+}
+
+export interface Category {
+  id?: string;
+  name: string;
+  type: 'income' | 'expense' | 'installment';
+  isActive: number;
+  order?: number;
+}
+
+export interface PaymentMethod {
+  id?: string;
+  name: string;
+  isActive: number;
+  order?: number;
+}
+
+export interface AppSettings {
+  id?: string;
+  familyName: string;
+  husbandName: string;
+  wifeName: string;
+  currency: string;
+  dateFormat: string;
+  theme: 'light' | 'dark' | 'system';
+  defaultDashboardPeriod: string;
+}
 
 interface AppState {
+  user: User | null;
+  authLoaded: boolean;
+  
   incomes: Income[];
   expenses: Expense[];
   installments: Installment[];
   categories: Category[];
-  budgets: Budget[];
   paymentMethods: PaymentMethod[];
   appSettings: AppSettings | null;
   
-  
-  // Computed (Global for the store or current month defaults)
   totalIncome: number;
   dailyExpenseTotal: number;
   installmentPaymentTotal: number;
@@ -24,212 +99,39 @@ interface AppState {
   totalOutstanding: number;
   
   // Actions
-  refreshData: () => Promise<void>;
-  initializeDemoData: () => Promise<void>;
+  initializeFirebaseListeners: () => void;
+  
+  addIncome: (income: Omit<Income, 'id'>) => Promise<void>;
+  deleteIncome: (id: string) => Promise<void>;
+  
+  addExpense: (expense: Omit<Expense, 'id'>) => Promise<void>;
+  deleteExpense: (id: string) => Promise<void>;
+  updateExpense: (id: string, expense: Partial<Expense>) => Promise<void>;
+  
+  addInstallment: (installment: Omit<Installment, 'id'>) => Promise<void>;
+  deleteInstallment: (id: string) => Promise<void>;
+  updateInstallment: (id: string, installment: Partial<Installment>) => Promise<void>;
+  
+  addCategory: (category: Omit<Category, 'id'>) => Promise<void>;
+  updateCategory: (id: string, category: Partial<Category>) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
+  
+  addPaymentMethod: (pm: Omit<PaymentMethod, 'id'>) => Promise<void>;
+  updatePaymentMethod: (id: string, pm: Partial<PaymentMethod>) => Promise<void>;
+  deletePaymentMethod: (id: string) => Promise<void>;
+  
+  updateSettings: (id: string, settings: Partial<AppSettings>) => Promise<void>;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
-  incomes: [],
-  expenses: [],
-  installments: [],
-  categories: [],
-  budgets: [],
-  paymentMethods: [],
-  appSettings: null,
+let unsubscribers: (() => void)[] = [];
+
+export const useAppStore = create<AppState>((set, get) => {
   
-  
-  totalIncome: 0,
-  dailyExpenseTotal: 0,
-  installmentPaymentTotal: 0,
-  cashFlow: 0,
-  savingRate: 0,
-  totalMonthlyInstallment: 0,
-  totalOutstanding: 0,
-  
-  refreshData: async () => {
-    // We get current month/year for filtering on Dashboard.
-    // For simplicity, we calculate totals for all time or current month depending on needs.
-    // Let's assume global totals first, but we can refine to monthly later.
-    const incomes = await db.incomes.toArray();
-    const expenses = await db.expenses.toArray();
-    const installments = await db.installments.toArray();
-    let categories = await db.categories.toArray();
-    let paymentMethods = await db.paymentMethods.toArray();
-    let appSettingsArr = await db.appSettings.toArray();
-    
-    // Seed default Categories if empty
-    if (categories.length === 0) {
-      const defaultCategories: Category[] = [
-        // Incomes
-        { name: 'Gaji', type: 'income', isActive: 1 },
-        { name: 'Bonus', type: 'income', isActive: 1 },
-        { name: 'Freelance', type: 'income', isActive: 1 },
-        { name: 'Bisnis', type: 'income', isActive: 1 },
-        { name: 'Komisi', type: 'income', isActive: 1 },
-        { name: 'Investasi', type: 'income', isActive: 1 },
-        { name: 'Hadiah', type: 'income', isActive: 1 },
-        { name: 'Lainnya', type: 'income', isActive: 1 },
-        // Expenses
-        { name: 'Makanan & Minuman', type: 'expense', isActive: 1 },
-        { name: 'Rumah Tangga', type: 'expense', isActive: 1 },
-        { name: 'Transportasi', type: 'expense', isActive: 1 },
-        { name: 'Anak', type: 'expense', isActive: 1 },
-        { name: 'Pendidikan', type: 'expense', isActive: 1 },
-        { name: 'Kesehatan', type: 'expense', isActive: 1 },
-        { name: 'Asuransi', type: 'expense', isActive: 1 },
-        { name: 'Tagihan & Utilitas', type: 'expense', isActive: 1 },
-        { name: 'Belanja Pribadi', type: 'expense', isActive: 1 },
-        { name: 'Hiburan', type: 'expense', isActive: 1 },
-        { name: 'Sosial', type: 'expense', isActive: 1 },
-        { name: 'Pembayaran Tagihan CC/SPaylater', type: 'expense', isActive: 1 },
-        { name: 'Biaya Admin & Transaksi', type: 'expense', isActive: 1 },
-        { name: 'Lainnya', type: 'expense', isActive: 1 },
-        // Installments
-        { name: 'KPR', type: 'installment', isActive: 1 },
-        { name: 'Kendaraan', type: 'installment', isActive: 1 },
-        { name: 'Kartu Kredit BCA', type: 'installment', isActive: 1 },
-        { name: 'Kartu Kredit Mandiri', type: 'installment', isActive: 1 },
-        { name: 'SPaylater', type: 'installment', isActive: 1 },
-        { name: 'Pinjaman', type: 'installment', isActive: 1 },
-        { name: 'Elektronik', type: 'installment', isActive: 1 },
-        { name: 'Lainnya', type: 'installment', isActive: 1 },
-      ];
-      await db.categories.bulkAdd(defaultCategories);
-      categories = await db.categories.toArray();
-    }
-
-    // Seed default Payment Methods if empty
-    if (paymentMethods.length === 0) {
-      const defaultPMs: PaymentMethod[] = [
-        { name: 'Cash', isActive: 1 },
-        { name: 'Transfer Bank', isActive: 1 },
-        { name: 'Debit', isActive: 1 },
-        { name: 'Kartu Kredit BCA', isActive: 1 },
-        { name: 'Kartu Kredit Mandiri', isActive: 1 },
-        { name: 'E-Wallet', isActive: 1 },
-        { name: 'SPaylater', isActive: 1 },
-        { name: 'Lainnya', isActive: 1 }
-      ];
-      await db.paymentMethods.bulkAdd(defaultPMs);
-      paymentMethods = await db.paymentMethods.toArray();
-    }
-
-    // Seed default AppSettings if empty
-    if (appSettingsArr.length === 0) {
-      const defaultSettings: AppSettings = {
-        familyName: 'Keluarga',
-        husbandName: 'Suami',
-        wifeName: 'Istri',
-        currency: 'IDR',
-        dateFormat: 'DD/MM/YYYY',
-        theme: 'system',
-        defaultDashboardPeriod: 'Bulan Ini'
-      };
-      await db.appSettings.add(defaultSettings);
-      appSettingsArr = await db.appSettings.toArray();
-    }
-    
-    // Auto-migration for missing default categories
-    if (categories.length > 0) {
-      const catToAdd: {name: string, type: 'expense', isActive: number}[] = [];
-      if (!categories.some(c => c.name === 'Asuransi' && c.type === 'expense')) {
-        catToAdd.push({ name: 'Asuransi', type: 'expense', isActive: 1 });
-      }
-      if (!categories.some(c => c.name === 'Biaya Admin & Transaksi' && c.type === 'expense')) {
-        catToAdd.push({ name: 'Biaya Admin & Transaksi', type: 'expense', isActive: 1 });
-      }
-      if (catToAdd.length > 0) {
-        await db.categories.bulkAdd(catToAdd as Category[]);
-        categories = await db.categories.toArray();
-      }
-    }
-    
-    if (categories.length > 0) {
-      const catToAdd: {name: string, type: 'installment', isActive: number}[] = [];
-      if (!categories.some(c => c.name === 'Kartu Kredit BCA' && c.type === 'installment')) catToAdd.push({ name: 'Kartu Kredit BCA', type: 'installment', isActive: 1 });
-      if (!categories.some(c => c.name === 'Kartu Kredit Mandiri' && c.type === 'installment')) catToAdd.push({ name: 'Kartu Kredit Mandiri', type: 'installment', isActive: 1 });
-      if (catToAdd.length > 0) {
-        await db.categories.bulkAdd(catToAdd);
-        categories = await db.categories.toArray();
-      }
-    }
-    
-    // Auto-migration for missing default payment methods
-    if (paymentMethods.length > 0) {
-      const pmToAdd: {name: string, isActive: number}[] = [];
-      if (!paymentMethods.some(pm => pm.name === 'Kartu Kredit BCA')) pmToAdd.push({ name: 'Kartu Kredit BCA', isActive: 1 });
-      if (!paymentMethods.some(pm => pm.name === 'Kartu Kredit Mandiri')) pmToAdd.push({ name: 'Kartu Kredit Mandiri', isActive: 1 });
-      if (pmToAdd.length > 0) {
-        await db.paymentMethods.bulkAdd(pmToAdd);
-        paymentMethods = await db.paymentMethods.toArray();
-      }
-    }
-    
-    // Deduplicate Categories (in case of concurrent seeding)
-    const uniqueCategories = new Map();
-    const categoryIdsToDelete: any[] = [];
-    for (const c of categories) {
-      const key = `${c.name}-${c.type}`;
-      if (uniqueCategories.has(key)) {
-        if (c.id) categoryIdsToDelete.push(c.id);
-      } else {
-        uniqueCategories.set(key, true);
-      }
-    }
-    if (categoryIdsToDelete.length > 0) {
-      await db.categories.bulkDelete(categoryIdsToDelete);
-      categories = await db.categories.toArray();
-    }
-
-    // Deduplicate Payment Methods
-    const uniquePMs = new Map();
-    const pmIdsToDelete: any[] = [];
-    for (const pm of paymentMethods) {
-      if (uniquePMs.has(pm.name)) {
-        if (pm.id) pmIdsToDelete.push(pm.id);
-      } else {
-        uniquePMs.set(pm.name, true);
-      }
-    }
-    if (pmIdsToDelete.length > 0) {
-      await db.paymentMethods.bulkDelete(pmIdsToDelete);
-      paymentMethods = await db.paymentMethods.toArray();
-    }
-
-    // Initialize order if undefined
-    let catUpdates = false;
-    for (let i = 0; i < categories.length; i++) {
-      if (categories[i].order === undefined) {
-        categories[i].order = i;
-        if (categories[i].id) await db.categories.update(categories[i].id!, { order: i });
-        catUpdates = true;
-      }
-    }
-    if (catUpdates) categories = await db.categories.toArray();
-
-    let pmUpdates = false;
-    for (let i = 0; i < paymentMethods.length; i++) {
-      if (paymentMethods[i].order === undefined) {
-        paymentMethods[i].order = i;
-        if (paymentMethods[i].id) await db.paymentMethods.update(paymentMethods[i].id!, { order: i });
-        pmUpdates = true;
-      }
-    }
-    if (pmUpdates) paymentMethods = await db.paymentMethods.toArray();
-
-    // Sort by order
-    categories.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    paymentMethods.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-
-    const budgets = await db.budgets.toArray();
-    
-    const now = new Date();
-    const currentMonthStr = getFinancialPeriod(now);
-
+  // Helper to recalculate summary whenever data changes
+  const recalcSummary = (incomes: Income[], expenses: Expense[], installments: Installment[]) => {
+    const currentMonthStr = getFinancialPeriod(new Date());
     const summary = calculateFinancialSummary(incomes, expenses, installments, currentMonthStr);
-
     set({
-      incomes, expenses, installments, categories, budgets, paymentMethods, appSettings: appSettingsArr[0],
       totalIncome: summary.totalIncome, 
       dailyExpenseTotal: summary.dailyExpenseTotal, 
       installmentPaymentTotal: summary.installmentPaymentTotal,
@@ -238,47 +140,141 @@ export const useAppStore = create<AppState>((set, get) => ({
       totalMonthlyInstallment: summary.totalMonthlyInstallment, 
       totalOutstanding: summary.totalOutstanding
     });
-  },
+  };
 
-  initializeDemoData: async () => {
-    const count = await db.incomes.count();
-    if (count > 0) return; // already initialized
-
-    const today = new Date().toISOString();
+  return {
+    user: null,
+    authLoaded: false,
     
-    await db.incomes.bulkAdd([
-      { date: today, source: 'Gaji Suami', owner: 'Suami', amount: 10000000, timestamp: Date.now() },
-      { date: today, source: 'Gaji Istri', owner: 'Istri', amount: 7000000, timestamp: Date.now() },
-      { date: today, source: 'Freelance', owner: 'Suami', amount: 1500000, timestamp: Date.now() }
-    ]);
+    incomes: [],
+    expenses: [],
+    installments: [],
+    categories: [],
+    paymentMethods: [],
+    appSettings: null,
+    
+    totalIncome: 0,
+    dailyExpenseTotal: 0,
+    installmentPaymentTotal: 0,
+    cashFlow: 0,
+    savingRate: 0,
+    totalMonthlyInstallment: 0,
+    totalOutstanding: 0,
 
-    await db.expenses.bulkAdd([
-      { date: today, category: 'Makanan & Minuman', payment_method: 'Cash', owner: 'Bersama', amount: 150000, description: 'Belanja sayur', timestamp: Date.now() },
-      { date: today, category: 'Transportasi', payment_method: 'Debit', owner: 'Suami', amount: 300000, description: 'Bensin', timestamp: Date.now() }
-    ]);
+    addIncome: async (income) => { await addDoc(collection(db, 'incomes'), income); },
+    deleteIncome: async (id) => { await deleteDoc(doc(db, 'incomes', id)); },
+    
+    addExpense: async (expense) => { await addDoc(collection(db, 'expenses'), expense); },
+    deleteExpense: async (id) => { await deleteDoc(doc(db, 'expenses', id)); },
+    updateExpense: async (id, expense) => { await updateDoc(doc(db, 'expenses', id), expense); },
+    
+    addInstallment: async (inst) => { await addDoc(collection(db, 'installments'), inst); },
+    deleteInstallment: async (id) => { await deleteDoc(doc(db, 'installments', id)); },
+    updateInstallment: async (id, inst) => { await updateDoc(doc(db, 'installments', id), inst); },
+    
+    addCategory: async (category) => { await addDoc(collection(db, 'categories'), category); },
+    updateCategory: async (id, category) => { await updateDoc(doc(db, 'categories', id), category); },
+    deleteCategory: async (id) => { await deleteDoc(doc(db, 'categories', id)); },
+    
+    addPaymentMethod: async (pm) => { await addDoc(collection(db, 'paymentMethods'), pm); },
+    updatePaymentMethod: async (id, pm) => { await updateDoc(doc(db, 'paymentMethods', id), pm); },
+    deletePaymentMethod: async (id) => { await deleteDoc(doc(db, 'paymentMethods', id)); },
+    
+    updateSettings: async (id, settings) => { await updateDoc(doc(db, 'appSettings', id), settings); },
 
-    await db.installments.bulkAdd([
-      { 
-        name: 'KPR', type: 'KPR', initial_amount: 500000000, monthly_payment: 3000000, 
-        tenor: 180, paid_installments: 12, remaining_installments: 168, 
-        outstanding: 500000000 - (3000000 * 12), due_date: new Date(new Date().setDate(new Date().getDate() + 5)).toISOString(), 
-        payment_method: 'Transfer', status: 'Aman', timestamp: Date.now() 
-      },
-      { 
-        name: 'Kartu Kredit', type: 'Kartu Kredit', initial_amount: 15000000, monthly_payment: 1500000, 
-        tenor: 10, paid_installments: 5, remaining_installments: 5, 
-        outstanding: 7500000, due_date: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString(), 
-        payment_method: 'Transfer', status: 'Segera jatuh tempo', timestamp: Date.now() 
-      }
-    ]);
+    initializeFirebaseListeners: () => {
+      // Clear previous listeners if any
+      unsubscribers.forEach(unsub => unsub());
+      unsubscribers = [];
 
-    await get().refreshData();
+      const unsubIncomes = onSnapshot(collection(db, 'incomes'), (snapshot) => {
+        const incomes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Income));
+        set({ incomes });
+        recalcSummary(incomes, get().expenses, get().installments);
+      });
+      
+      const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
+        const expenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense));
+        set({ expenses });
+        recalcSummary(get().incomes, expenses, get().installments);
+      });
+      
+      const unsubInstallments = onSnapshot(collection(db, 'installments'), (snapshot) => {
+        const installments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Installment));
+        set({ installments });
+        recalcSummary(get().incomes, get().expenses, installments);
+      });
+      
+      const unsubCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
+        const categories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+        // Sort categories safely handling undefined orders
+        categories.sort((a, b) => (a.order || 0) - (b.order || 0));
+        
+        // Auto seed default categories if entirely empty
+        if (categories.length === 0) {
+          const defaultCategories: Omit<Category, 'id'>[] = [
+            { name: 'Gaji', type: 'income', isActive: 1, order: 1 },
+            { name: 'Bonus', type: 'income', isActive: 1, order: 2 },
+            { name: 'Makanan & Minuman', type: 'expense', isActive: 1, order: 1 },
+            { name: 'Transportasi', type: 'expense', isActive: 1, order: 2 },
+            { name: 'Tagihan & Utilitas', type: 'expense', isActive: 1, order: 3 },
+            { name: 'KPR', type: 'installment', isActive: 1, order: 1 },
+            { name: 'Kartu Kredit', type: 'installment', isActive: 1, order: 2 }
+          ];
+          defaultCategories.forEach(cat => addDoc(collection(db, 'categories'), cat));
+        } else {
+          set({ categories });
+        }
+      });
+      
+      const unsubPaymentMethods = onSnapshot(collection(db, 'paymentMethods'), (snapshot) => {
+        const paymentMethods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentMethod));
+        paymentMethods.sort((a, b) => (a.order || 0) - (b.order || 0));
+        
+        if (paymentMethods.length === 0) {
+          const defaultPMs: Omit<PaymentMethod, 'id'>[] = [
+            { name: 'Cash', isActive: 1, order: 1 },
+            { name: 'Transfer Bank', isActive: 1, order: 2 },
+            { name: 'Kartu Kredit', isActive: 1, order: 3 }
+          ];
+          defaultPMs.forEach(pm => addDoc(collection(db, 'paymentMethods'), pm));
+        } else {
+          set({ paymentMethods });
+        }
+      });
+      
+      const unsubSettings = onSnapshot(collection(db, 'appSettings'), (snapshot) => {
+        if (!snapshot.empty) {
+          const appSettings = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as AppSettings;
+          set({ appSettings });
+        } else {
+          // Create default settings if empty
+          const defaultSettings: Omit<AppSettings, 'id'> = {
+            familyName: 'Keluarga',
+            husbandName: 'Suami',
+            wifeName: 'Istri',
+            currency: 'IDR',
+            dateFormat: 'DD/MM/YYYY',
+            theme: 'light',
+            defaultDashboardPeriod: 'Bulan Ini'
+          };
+          addDoc(collection(db, 'appSettings'), defaultSettings);
+        }
+      });
+
+      unsubscribers.push(unsubIncomes, unsubExpenses, unsubInstallments, unsubCategories, unsubPaymentMethods, unsubSettings);
+    }
+  };
+});
+
+// Setup Auth Listener
+onAuthStateChanged(auth, (user) => {
+  useAppStore.setState({ user, authLoaded: true });
+  if (user) {
+    useAppStore.getState().initializeFirebaseListeners();
+  } else {
+    // Unsubscribe when logged out
+    unsubscribers.forEach(unsub => unsub());
+    unsubscribers = [];
   }
-}));
-
-liveQuery(() => db.incomes.toArray()).subscribe(() => useAppStore.getState().refreshData());
-liveQuery(() => db.expenses.toArray()).subscribe(() => useAppStore.getState().refreshData());
-liveQuery(() => db.installments.toArray()).subscribe(() => useAppStore.getState().refreshData());
-liveQuery(() => db.categories.toArray()).subscribe(() => useAppStore.getState().refreshData());
-liveQuery(() => db.paymentMethods.toArray()).subscribe(() => useAppStore.getState().refreshData());
-liveQuery(() => db.appSettings.toArray()).subscribe(() => useAppStore.getState().refreshData());
+});

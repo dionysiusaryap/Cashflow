@@ -14,6 +14,7 @@
     "date-fns": "^4.4.0",
     "dexie": "^4.4.5",
     "dexie-react-hooks": "^4.4.0",
+    "firebase": "^12.19.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-icons": "^5.7.0",

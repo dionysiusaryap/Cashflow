@@ -2,11 +2,10 @@ import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
 import { getFinancialPeriod, formatPeriodToMonthYear } from '../utils/dateUtils';
-import { db } from '../db/database';
 import { MdAdd, MdDelete, MdEdit } from 'react-icons/md';
 
 const Pengeluaran = () => {
-  const { expenses, dailyExpenseTotal, appSettings, categories: allCategories, paymentMethods: allPaymentMethods } = useAppStore();
+  const { expenses, dailyExpenseTotal, appSettings, categories: allCategories, paymentMethods: allPaymentMethods, addExpense, deleteExpense, updateExpense } = useAppStore();
   
   const categories = allCategories.filter(c => c.type === 'expense' && c.isActive === 1);
   const paymentMethods = allPaymentMethods.filter(pm => pm.isActive === 1);
@@ -133,9 +132,9 @@ const Pengeluaran = () => {
     };
 
     if (editingId) {
-      await db.expenses.update(editingId, payload);
+      await updateExpense(editingId, payload);
     } else {
-      await db.expenses.add(payload);
+      await addExpense(payload);
     }
 
     closeModal();
@@ -143,7 +142,7 @@ const Pengeluaran = () => {
 
   const handleDelete = async (id?: string) => {
     if (id && window.confirm('Apakah Anda yakin ingin menghapus data pengeluaran ini?')) {
-      await db.expenses.delete(id);
+      await deleteExpense(id);
     }
   };
 

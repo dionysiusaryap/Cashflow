@@ -1,11 +1,17 @@
 import React, { useState, useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { db, type Category, type PaymentMethod } from '../db/database';
+import type { Category, PaymentMethod } from '../store/useAppStore';
 import { MdAdd, MdDownload, MdUpload, MdWarning, MdEdit, MdDelete, MdArrowUpward, MdArrowDownward } from 'react-icons/md';
 
 const Pengaturan = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { appSettings, categories, paymentMethods } = useAppStore();
+  const { 
+    appSettings, categories, paymentMethods, incomes, expenses, installments,
+    updateSettings, addCategory, updateCategory, deleteCategory,
+    addPaymentMethod, updatePaymentMethod, deletePaymentMethod,
+    addIncome, addExpense, addInstallment,
+    deleteIncome, deleteExpense, deleteInstallment
+  } = useAppStore();
 
   // Profil Form
   const [profile, setProfile] = useState({
@@ -25,7 +31,7 @@ const Pengaturan = () => {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (appSettings?.id) {
-      await db.appSettings.update(appSettings.id, {
+      await updateSettings(appSettings.id, {
         familyName: profile.familyName,
         husbandName: profile.husbandName,
         wifeName: profile.wifeName
@@ -37,11 +43,10 @@ const Pengaturan = () => {
   const handleSavePreferences = async (e: React.FormEvent) => {
     e.preventDefault();
     if (appSettings?.id) {
-      await db.appSettings.update(appSettings.id, {
+      await updateSettings(appSettings.id, {
         theme: preferences.theme as 'light' | 'dark' | 'system',
         defaultDashboardPeriod: preferences.defaultDashboardPeriod
       });
-      // Update DOM theme
       document.documentElement.setAttribute('data-theme', preferences.theme);
       alert('Preferensi berhasil disimpan!');
     }
@@ -49,7 +54,7 @@ const Pengaturan = () => {
 
   const handleToggleCategory = async (cat: Category) => {
     if (cat.id) {
-      await db.categories.update(cat.id, { isActive: cat.isActive === 1 ? 0 : 1 });
+      await updateCategory(cat.id, { isActive: cat.isActive === 1 ? 0 : 1 });
     }
   };
 
@@ -57,7 +62,7 @@ const Pengaturan = () => {
     e.preventDefault();
     if (newCategory.name.trim()) {
       const maxOrder = categories.reduce((max, c) => Math.max(max, c.order ?? 0), 0);
-      await db.categories.add({
+      await addCategory({
         name: newCategory.name.trim(),
         type: newCategory.type,
         isActive: 1,
@@ -70,26 +75,14 @@ const Pengaturan = () => {
   const handleEditCategory = async (cat: Category) => {
     const newName = window.prompt('Ubah nama kategori:', cat.name);
     if (newName && newName.trim() !== '' && newName !== cat.name && cat.id) {
-      const oldName = cat.name;
-      const cleanNewName = newName.trim();
-      
-      await db.transaction('rw', [db.categories, db.expenses, db.incomes, db.installments], async () => {
-        await db.categories.update(cat.id!, { name: cleanNewName });
-        
-        if (cat.type === 'expense') {
-          await db.expenses.where('category').equals(oldName).modify({ category: cleanNewName });
-        } else if (cat.type === 'income') {
-          await db.incomes.where('source').equals(oldName).modify({ source: cleanNewName });
-        } else if (cat.type === 'installment') {
-          await db.installments.where('type').equals(oldName).modify({ type: cleanNewName });
-        }
-      });
+      await updateCategory(cat.id, { name: newName.trim() });
+      alert('Kategori diubah. Catatan lama tetap menggunakan nama lama.');
     }
   };
 
   const handleDeleteCategory = async (cat: Category) => {
-    if (window.confirm(`Hapus kategori "${cat.name}"? Peringatan: Transaksi lama yang menggunakan kategori ini mungkin kehilangan referensinya. Disarankan untuk 'Nonaktifkan' saja.`)) {
-      if (cat.id) await db.categories.delete(cat.id);
+    if (window.confirm(`Hapus kategori "${cat.name}"? Peringatan: Disarankan 'Nonaktifkan' saja agar data lama tidak hilang kategorinya.`)) {
+      if (cat.id) await deleteCategory(cat.id);
     }
   };
 
@@ -110,14 +103,14 @@ const Pengaturan = () => {
         targetOrder = direction === 'up' ? currentOrder + 1 : currentOrder - 1;
       }
 
-      await db.categories.update(current.id, { order: targetOrder });
-      await db.categories.update(target.id, { order: currentOrder });
+      await updateCategory(current.id, { order: targetOrder });
+      await updateCategory(target.id, { order: currentOrder });
     }
   };
 
   const handleTogglePaymentMethod = async (pm: PaymentMethod) => {
     if (pm.id) {
-      await db.paymentMethods.update(pm.id, { isActive: pm.isActive === 1 ? 0 : 1 });
+      await updatePaymentMethod(pm.id, { isActive: pm.isActive === 1 ? 0 : 1 });
     }
   };
 
@@ -125,7 +118,7 @@ const Pengaturan = () => {
     e.preventDefault();
     if (newPaymentMethod.trim()) {
       const maxOrder = paymentMethods.reduce((max, pm) => Math.max(max, pm.order ?? 0), 0);
-      await db.paymentMethods.add({
+      await addPaymentMethod({
         name: newPaymentMethod.trim(),
         isActive: 1,
         order: maxOrder + 1
@@ -137,20 +130,14 @@ const Pengaturan = () => {
   const handleEditPaymentMethod = async (pm: PaymentMethod) => {
     const newName = window.prompt('Ubah metode pembayaran:', pm.name);
     if (newName && newName.trim() !== '' && newName !== pm.name && pm.id) {
-      const oldName = pm.name;
-      const cleanNewName = newName.trim();
-      
-      await db.transaction('rw', [db.paymentMethods, db.expenses, db.installments], async () => {
-        await db.paymentMethods.update(pm.id!, { name: cleanNewName });
-        await db.expenses.where('payment_method').equals(oldName).modify({ payment_method: cleanNewName });
-        await db.installments.filter(i => i.payment_method === oldName).modify({ payment_method: cleanNewName });
-      });
+      await updatePaymentMethod(pm.id, { name: newName.trim() });
+      alert('Metode diubah. Catatan lama tetap menggunakan metode lama.');
     }
   };
 
   const handleDeletePaymentMethod = async (pm: PaymentMethod) => {
-    if (window.confirm(`Hapus metode pembayaran "${pm.name}"? Peringatan: Transaksi lama yang menggunakannya mungkin kehilangan referensinya. Disarankan untuk 'Nonaktifkan' saja.`)) {
-      if (pm.id) await db.paymentMethods.delete(pm.id);
+    if (window.confirm(`Hapus metode pembayaran "${pm.name}"?`)) {
+      if (pm.id) await deletePaymentMethod(pm.id);
     }
   };
 
@@ -164,26 +151,22 @@ const Pengaturan = () => {
     if (current.id && target.id) {
       let currentOrder = current.order ?? index;
       let targetOrder = target.order ?? targetIndex;
+      if (currentOrder === targetOrder) targetOrder = direction === 'up' ? currentOrder + 1 : currentOrder - 1;
       
-      if (currentOrder === targetOrder) {
-        targetOrder = direction === 'up' ? currentOrder + 1 : currentOrder - 1;
-      }
-      
-      await db.paymentMethods.update(current.id, { order: targetOrder });
-      await db.paymentMethods.update(target.id, { order: currentOrder });
+      await updatePaymentMethod(current.id, { order: targetOrder });
+      await updatePaymentMethod(target.id, { order: currentOrder });
     }
   };
 
   const handleExport = async () => {
     try {
       const data = {
-        incomes: await db.incomes.toArray(),
-        expenses: await db.expenses.toArray(),
-        installments: await db.installments.toArray(),
-        categories: await db.categories.toArray(),
-        paymentMethods: await db.paymentMethods.toArray(),
-        appSettings: await db.appSettings.toArray(),
-        budgets: await db.budgets.toArray(),
+        incomes,
+        expenses,
+        installments,
+        categories,
+        paymentMethods,
+        appSettings,
         exportDate: new Date().toISOString()
       };
       
@@ -215,27 +198,28 @@ const Pengaturan = () => {
           return;
         }
 
-        if (window.confirm('PERINGATAN: Seluruh data Anda saat ini akan dihapus dan diganti dengan data dari file backup ini. Lanjutkan?')) {
-          await db.transaction('rw', [db.incomes, db.expenses, db.installments, db.categories, db.budgets, db.paymentMethods, db.appSettings], async () => {
-            await db.incomes.clear();
-            await db.expenses.clear();
-            await db.installments.clear();
-            await db.categories.clear();
-            await db.budgets.clear();
-            await db.paymentMethods.clear();
-            await db.appSettings.clear();
-            
-            if (data.incomes?.length) await db.incomes.bulkAdd(data.incomes);
-            if (data.expenses?.length) await db.expenses.bulkAdd(data.expenses);
-            if (data.installments?.length) await db.installments.bulkAdd(data.installments);
-            if (data.categories?.length) await db.categories.bulkAdd(data.categories);
-            if (data.budgets?.length) await db.budgets.bulkAdd(data.budgets);
-            if (data.paymentMethods?.length) await db.paymentMethods.bulkAdd(data.paymentMethods);
-            if (data.appSettings?.length) await db.appSettings.bulkAdd(data.appSettings);
-          });
+        if (window.confirm('PERINGATAN: Mengimpor data akan memakan waktu untuk mengunggahnya ke Firebase. Lanjutkan?')) {
+          // Loop over and push to Firebase (we exclude 'id' to create new docs)
+          if (data.incomes?.length) {
+            for (const item of data.incomes) {
+              const { id, ...rest } = item;
+              await addIncome(rest);
+            }
+          }
+          if (data.expenses?.length) {
+            for (const item of data.expenses) {
+              const { id, ...rest } = item;
+              await addExpense(rest);
+            }
+          }
+          if (data.installments?.length) {
+            for (const item of data.installments) {
+              const { id, ...rest } = item;
+              await addInstallment(rest);
+            }
+          }
           
-          alert('Restore data berhasil! Halaman akan dimuat ulang untuk memuat data baru.');
-          window.location.reload();
+          alert('Import data ke Cloud Firebase berhasil!');
         }
       } catch (err) {
         console.error(err);
@@ -250,19 +234,15 @@ const Pengaturan = () => {
   };
 
   const handleReset = async () => {
-    if (window.confirm('PERINGATAN KRITIKAL: Semua data transaksi, cicilan, dan pengaturan akan dihapus. Tindakan ini tidak dapat dibatalkan. Lanjutkan?')) {
+    if (window.confirm('PERINGATAN KRITIKAL: Semua data di CLOUD akan dihapus. Lanjutkan?')) {
       if (window.confirm('Apakah Anda BENAR-BENAR yakin? Data yang hilang tidak dapat dikembalikan tanpa file backup.')) {
-        await db.transaction('rw', [db.incomes, db.expenses, db.installments, db.categories, db.paymentMethods, db.appSettings, db.budgets], async () => {
-          await db.incomes.clear();
-          await db.expenses.clear();
-          await db.installments.clear();
-          await db.categories.clear();
-          await db.paymentMethods.clear();
-          await db.appSettings.clear();
-          await db.budgets.clear();
-        });
-        alert('Database telah direset. Halaman akan dimuat ulang.');
-        window.location.reload();
+        
+        // Delete all data one by one (Firestore requirement)
+        for (const item of incomes) if (item.id) await deleteIncome(item.id);
+        for (const item of expenses) if (item.id) await deleteExpense(item.id);
+        for (const item of installments) if (item.id) await deleteInstallment(item.id);
+        
+        alert('Database telah dikosongkan.');
       }
     }
   };
@@ -346,13 +326,13 @@ const Pengaturan = () => {
 
           {/* DATA & BACKUP */}
           <div className="card">
-            <h3 className="mb-4">💾 Data & Backup</h3>
+            <h3 className="mb-4">💾 Data & Backup (Firebase Cloud)</h3>
             <div className="flex gap-2 mb-4">
               <button className="btn btn-outline" onClick={handleExport}>
                 <MdDownload /> Export JSON
               </button>
               <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>
-                <MdUpload /> Import JSON
+                <MdUpload /> Import JSON ke Cloud
               </button>
               <input 
                 type="file" 
@@ -363,10 +343,10 @@ const Pengaturan = () => {
               />
             </div>
             <div style={{ padding: '1rem', background: 'var(--danger-color)', color: 'white', borderRadius: 'var(--radius-md)' }}>
-              <h4 className="flex align-center gap-2 mb-2"><MdWarning /> Reset Database</h4>
-              <p style={{ fontSize: '0.875rem', marginBottom: '1rem' }}>Menghapus seluruh transaksi, cicilan, dan pengaturan ke pengaturan pabrik.</p>
+              <h4 className="flex align-center gap-2 mb-2"><MdWarning /> Hapus Semua Data Cloud</h4>
+              <p style={{ fontSize: '0.875rem', marginBottom: '1rem' }}>Menghapus seluruh transaksi dari Firebase.</p>
               <button className="btn" style={{ background: 'white', color: 'var(--danger-color)' }} onClick={handleReset}>
-                Reset Semua Data
+                Hapus Semua Data
               </button>
             </div>
           </div>

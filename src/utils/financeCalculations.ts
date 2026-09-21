@@ -1,4 +1,4 @@
-import type { Income, Expense, Installment } from '../db/database';
+import type { Income, Expense, Installment } from '../store/useAppStore';
 import { getFinancialPeriod } from './dateUtils';
 
 export const calculateFinancialSummary = (

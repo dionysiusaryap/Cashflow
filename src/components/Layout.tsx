@@ -1,15 +1,7 @@
-import { useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { MdDashboard, MdAccountBalanceWallet, MdCreditCard, MdAnalytics, MdSettings } from 'react-icons/md';
-import { useAppStore } from '../store/useAppStore';
-
 const Layout = () => {
   const location = useLocation();
-  const { refreshData } = useAppStore();
-
-  useEffect(() => {
-    refreshData();
-  }, [refreshData]);
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: <MdDashboard /> },

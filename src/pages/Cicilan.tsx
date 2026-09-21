@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
-import { db } from '../db/database';
 import { MdAdd, MdDelete, MdPayment, MdEdit } from 'react-icons/md';
 
 const Cicilan = () => {
-  const { installments, totalMonthlyInstallment, totalOutstanding, categories: allCategories, paymentMethods: allPaymentMethods } = useAppStore();
+  const { installments, totalMonthlyInstallment, totalOutstanding, categories: allCategories, paymentMethods: allPaymentMethods, addInstallment, updateInstallment, deleteInstallment, addExpense } = useAppStore();
   
   const categories = allCategories.filter(c => c.type === 'installment' && c.isActive === 1);
   const paymentMethods = allPaymentMethods.filter(pm => pm.isActive === 1);
@@ -88,7 +87,7 @@ const Cicilan = () => {
         const newRemaining = Math.max(0, tenor - existing.paid_installments);
         const newOutstanding = Math.max(0, initialAmount - (existing.paid_installments * monthlyPayment));
         
-        await db.installments.update(editingId, {
+        await updateInstallment(editingId, {
           ...payload,
           remaining_installments: newRemaining,
           outstanding: newOutstanding,
@@ -96,7 +95,7 @@ const Cicilan = () => {
         });
       }
     } else {
-      await db.installments.add({
+      await addInstallment({
         ...payload,
         paid_installments: 0,
         remaining_installments: tenor,
@@ -119,25 +118,26 @@ const Cicilan = () => {
       const newPaid = inst.paid_installments + 1;
       const newRemaining = inst.remaining_installments - 1;
       const newOutstanding = Math.max(0, inst.outstanding - inst.monthly_payment);
+      const newStatus = newRemaining === 0 ? 'Lunas' : 'Aman';
       
       // Calculate next due date (+1 month)
       const currentDueDate = new Date(inst.due_date);
       currentDueDate.setMonth(currentDueDate.getMonth() + 1);
 
-      await db.installments.update(inst.id, {
+      await updateInstallment(inst.id, {
         paid_installments: newPaid,
         remaining_installments: newRemaining,
         outstanding: newOutstanding,
         due_date: currentDueDate.toISOString(),
-        status: newRemaining === 0 ? 'Lunas' : 'Aman'
+        status: newStatus
       });
 
-      // 2. Automatically add to Expenses
-      await db.expenses.add({
+      // 2. Add to expenses history
+      await addExpense({
         date: new Date().toISOString(),
         category: 'Tagihan & Utilitas',
         payment_method: inst.payment_method,
-        owner: 'Bersama', // Default
+        owner: 'Bersama', // Cicilan default to joint expense
         amount: inst.monthly_payment,
         description: `Pembayaran Cicilan: ${inst.name} (Bulan ke-${newPaid})`,
         installment_id: inst.id,
@@ -149,8 +149,8 @@ const Cicilan = () => {
   };
 
   const handleDelete = async (id?: string) => {
-    if (id && window.confirm('Apakah Anda yakin ingin menghapus data cicilan ini?')) {
-      await db.installments.delete(id);
+    if (id && window.confirm('Apakah Anda yakin ingin menghapus data cicilan ini? (Riwayat pembayaran tidak akan terhapus)')) {
+      await deleteInstallment(id);
     }
   };
 

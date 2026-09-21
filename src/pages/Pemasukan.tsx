@@ -2,11 +2,10 @@ import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
 import { getFinancialPeriod, formatPeriodToMonthYear } from '../utils/dateUtils';
-import { db } from '../db/database';
 import { MdAdd, MdDelete } from 'react-icons/md';
 
 const Pemasukan = () => {
-  const { incomes, totalIncome, appSettings, categories } = useAppStore();
+  const { incomes, totalIncome, appSettings, categories, addIncome, deleteIncome } = useAppStore();
   
   const incomeCategories = categories.filter(c => c.type === 'income' && c.isActive === 1);
   
@@ -43,8 +42,7 @@ const Pemasukan = () => {
     const sourceToSave = formData.source || (incomeCategories.length > 0 ? incomeCategories[0].name : '');
     
     if (!sourceToSave || !formData.amount) return;
-
-    await db.incomes.add({
+    await addIncome({
       date: new Date(formData.date).toISOString(),
       source: sourceToSave,
       owner: formData.owner as 'Suami' | 'Istri' | 'Bersama',
@@ -65,7 +63,7 @@ const Pemasukan = () => {
 
   const handleDelete = async (id?: string) => {
     if (id && window.confirm('Apakah Anda yakin ingin menghapus data pemasukan ini?')) {
-      await db.incomes.delete(id);
+      await deleteIncome(id);
     }
   };
 
