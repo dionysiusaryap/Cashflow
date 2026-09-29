@@ -51,7 +51,7 @@ const Dashboard = () => {
     const s = calculateFinancialSummary(incomes, expenses, installments, m);
     return { 
       name: formatPeriodToMonthYear(m).split(' ')[0], 
-      Pengeluaran: s.dailyExpenseTotal 
+      Pengeluaran: s.totalActualExpense 
     };
   });
 
@@ -125,8 +125,8 @@ const Dashboard = () => {
              <div style={{background: '#f3e8ff', color: '#8b5cf6', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>↓</div>
              <div className="text-secondary" style={{fontSize: '0.875rem', fontWeight: 600}}>Total Expenses</div>
           </div>
-          <div className="card-value mb-1">{formatCurrency(summary.dailyExpenseTotal)}</div>
-          <div className="text-secondary" style={{fontSize: '0.75rem'}}><span className="text-danger">↗</span> Daily expenses this month</div>
+          <div className="card-value mb-1">{formatCurrency(summary.totalActualExpense)}</div>
+          <div className="text-secondary" style={{fontSize: '0.75rem'}}><span className="text-danger">↗</span> All expenses this month</div>
         </div>
 
         <div className="card">

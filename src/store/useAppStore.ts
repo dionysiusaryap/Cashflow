@@ -93,6 +93,7 @@ interface AppState {
   totalIncome: number;
   dailyExpenseTotal: number;
   installmentPaymentTotal: number;
+  totalActualExpense: number;
   cashFlow: number;
   savingRate: number;
   totalMonthlyInstallment: number;
@@ -136,6 +137,7 @@ export const useAppStore = create<AppState>((set, get) => {
       totalIncome: summary.totalIncome, 
       dailyExpenseTotal: summary.dailyExpenseTotal, 
       installmentPaymentTotal: summary.installmentPaymentTotal,
+      totalActualExpense: summary.totalActualExpense,
       cashFlow: summary.cashFlow,
       savingRate: summary.savingRate,
       totalMonthlyInstallment: summary.totalMonthlyInstallment, 
@@ -157,6 +159,7 @@ export const useAppStore = create<AppState>((set, get) => {
     totalIncome: 0,
     dailyExpenseTotal: 0,
     installmentPaymentTotal: 0,
+    totalActualExpense: 0,
     cashFlow: 0,
     savingRate: 0,
     totalMonthlyInstallment: 0,
