@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
 import { getFinancialPeriod, formatPeriodToMonthYear } from '../utils/dateUtils';
-import { MdAdd, MdDelete } from 'react-icons/md';
+import { MdAdd, MdDelete, MdEdit } from 'react-icons/md';
 
 const Pemasukan = () => {
-  const { incomes, totalIncome, appSettings, categories, addIncome, deleteIncome } = useAppStore();
+  const { incomes, totalIncome, appSettings, categories, addIncome, updateIncome, deleteIncome } = useAppStore();
   
   const incomeCategories = categories.filter(c => c.type === 'income' && c.isActive === 1);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     source: incomeCategories.length > 0 ? incomeCategories[0].name : '',
@@ -37,21 +38,9 @@ const Pemasukan = () => {
     return matchesSearch && matchesOwner && matchesMonth;
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const sourceToSave = formData.source || (incomeCategories.length > 0 ? incomeCategories[0].name : '');
-    
-    if (!sourceToSave || !formData.amount) return;
-    await addIncome({
-      date: new Date(formData.date).toISOString(),
-      source: sourceToSave,
-      owner: formData.owner as 'Suami' | 'Istri' | 'Bersama',
-      amount: Number(formData.amount),
-      notes: formData.notes,
-      timestamp: Date.now()
-    });
-
+  const closeModal = () => {
     setIsModalOpen(false);
+    setEditingId(null);
     setFormData({
       date: new Date().toISOString().split('T')[0],
       source: incomeCategories.length > 0 ? incomeCategories[0].name : '',
@@ -59,6 +48,42 @@ const Pemasukan = () => {
       amount: '',
       notes: ''
     });
+  };
+
+  const openEditModal = (income: any) => {
+    setEditingId(income.id);
+    setFormData({
+      date: new Date(income.date).toISOString().split('T')[0],
+      source: income.source,
+      owner: income.owner,
+      amount: income.amount.toString(),
+      notes: income.notes || ''
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const sourceToSave = formData.source || (incomeCategories.length > 0 ? incomeCategories[0].name : '');
+    
+    if (!sourceToSave || !formData.amount) return;
+    
+    const payload = {
+      date: new Date(formData.date).toISOString(),
+      source: sourceToSave,
+      owner: formData.owner as 'Suami' | 'Istri' | 'Bersama',
+      amount: Number(formData.amount),
+      notes: formData.notes,
+      timestamp: Date.now()
+    };
+
+    if (editingId) {
+      await updateIncome(editingId, payload);
+    } else {
+      await addIncome(payload);
+    }
+
+    closeModal();
   };
 
   const handleDelete = async (id?: string) => {
@@ -74,7 +99,17 @@ const Pemasukan = () => {
           <h1 className="page-title" style={{ marginBottom: '0' }}>Pemasukan</h1>
           <p className="text-secondary">Kelola data pemasukan keluarga</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setIsModalOpen(true)}>
+        <button className="btn btn-primary" onClick={() => {
+          setEditingId(null);
+          setFormData({
+            date: new Date().toISOString().split('T')[0],
+            source: incomeCategories.length > 0 ? incomeCategories[0].name : '',
+            owner: 'Suami',
+            amount: '',
+            notes: ''
+          });
+          setIsModalOpen(true);
+        }}>
           <MdAdd /> Tambah Pemasukan
         </button>
       </div>
@@ -156,13 +191,22 @@ const Pemasukan = () => {
                       {formatCurrency(income.amount)}
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      <button 
-                        onClick={() => handleDelete(income.id)}
-                        style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer', fontSize: '1.25rem' }}
-                        title="Hapus"
-                      >
-                        <MdDelete />
-                      </button>
+                      <div className="flex justify-center gap-2">
+                        <button 
+                          onClick={() => openEditModal(income)}
+                          style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer', fontSize: '1.25rem' }}
+                          title="Edit"
+                        >
+                          <MdEdit />
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(income.id)}
+                          style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer', fontSize: '1.25rem' }}
+                          title="Hapus"
+                        >
+                          <MdDelete />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -176,8 +220,8 @@ const Pemasukan = () => {
         <div className="modal-overlay">
           <div className="modal-content">
             <div className="modal-header">
-              <h2 className="modal-title">Tambah Pemasukan</h2>
-              <button className="close-btn" onClick={() => setIsModalOpen(false)}>&times;</button>
+              <h2 className="modal-title">{editingId ? 'Edit Pemasukan' : 'Tambah Pemasukan'}</h2>
+              <button className="close-btn" onClick={closeModal}>&times;</button>
             </div>
             
             <form onSubmit={handleSubmit}>
@@ -258,8 +302,8 @@ const Pemasukan = () => {
               </div>
               
               <div className="flex justify-between mt-4">
-                <button type="button" className="btn btn-outline" onClick={() => setIsModalOpen(false)}>Batal</button>
-                <button type="submit" className="btn btn-primary">Simpan Pemasukan</button>
+                <button type="button" className="btn btn-outline" onClick={closeModal}>Batal</button>
+                <button type="submit" className="btn btn-primary">{editingId ? 'Simpan Perubahan' : 'Simpan Pemasukan'}</button>
               </div>
             </form>
           </div>

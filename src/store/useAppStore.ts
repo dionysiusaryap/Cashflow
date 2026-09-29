@@ -102,6 +102,7 @@ interface AppState {
   initializeFirebaseListeners: () => void;
   
   addIncome: (income: Omit<Income, 'id'>) => Promise<void>;
+  updateIncome: (id: string, income: Partial<Income>) => Promise<void>;
   deleteIncome: (id: string) => Promise<void>;
   
   addExpense: (expense: Omit<Expense, 'id'>) => Promise<void>;
@@ -162,6 +163,7 @@ export const useAppStore = create<AppState>((set, get) => {
     totalOutstanding: 0,
 
     addIncome: async (income) => { await addDoc(collection(db, 'incomes'), income); },
+    updateIncome: async (id, income) => { await updateDoc(doc(db, 'incomes', id), income); },
     deleteIncome: async (id) => { await deleteDoc(doc(db, 'incomes', id)); },
     
     addExpense: async (expense) => { await addDoc(collection(db, 'expenses'), expense); },
