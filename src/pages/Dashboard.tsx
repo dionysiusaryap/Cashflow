@@ -35,11 +35,17 @@ const Dashboard = () => {
     e.category !== 'Pembayaran Tagihan CC/SPaylater'
   );
 
-  // Top spending category for daily expenses
+  // Mengelompokkan pengeluaran harian berdasarkan kategori
   const expenseByCategory = validDailyExpenses.reduce((acc, curr) => {
     acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
     return acc;
   }, {} as Record<string, number>);
+
+  // Menambahkan tagihan cicilan aktif ke dalam kategori agar total Pie Chart sinkron dengan Total Expense
+  installments.filter(i => (Number(i.remaining_installments) || 0) > 0).forEach(i => {
+    const categoryName = i.type || 'Cicilan Lainnya';
+    expenseByCategory[categoryName] = (expenseByCategory[categoryName] || 0) + (Number(i.monthly_payment) || 0);
+  });
 
   const categoryData = Object.keys(expenseByCategory).map(key => ({
     name: key,
