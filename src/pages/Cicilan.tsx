@@ -17,8 +17,11 @@ const Cicilan = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('Semua');
+  const [filterPaymentMethod, setFilterPaymentMethod] = useState('Semua');
   const [filterStatus, setFilterStatus] = useState('Semua');
-  const [filterMonth, setFilterMonth] = useState('Semua');
+  
+  const currentMonthStr = getFinancialPeriod(new Date());
+  const [filterMonth, setFilterMonth] = useState(currentMonthStr);
   const [sortBy, setSortBy] = useState('terbaru');
   const [formData, setFormData] = useState({
     name: '',
@@ -42,10 +45,11 @@ const Cicilan = () => {
     const matchesSearch = inst.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           (inst.notes && inst.notes.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesType = filterType === 'Semua' || inst.type === filterType;
+    const matchesPaymentMethod = filterPaymentMethod === 'Semua' || inst.payment_method === filterPaymentMethod;
     const matchesStatus = filterStatus === 'Semua' || inst.status === filterStatus;
     const matchesMonth = filterMonth === 'Semua' || getFinancialPeriod(inst.due_date) === filterMonth;
     
-    return matchesSearch && matchesType && matchesStatus && matchesMonth;
+    return matchesSearch && matchesType && matchesPaymentMethod && matchesStatus && matchesMonth;
   });
 
   const closeModal = () => {
@@ -249,7 +253,7 @@ const Cicilan = () => {
           <h3 style={{ margin: 0 }}>Daftar Cicilan Aktif</h3>
         </div>
         
-        <div className="grid grid-cols-5 gap-2 mb-4">
+        <div className="grid grid-cols-6 gap-2 mb-4">
           <input 
             type="text" 
             className="form-control" 
@@ -260,6 +264,10 @@ const Cicilan = () => {
           <select className="form-control" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
             <option value="Semua">Semua Jenis</option>
             {types.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select className="form-control" value={filterPaymentMethod} onChange={(e) => setFilterPaymentMethod(e.target.value)}>
+            <option value="Semua">Semua Pembayaran</option>
+            {paymentMethods.map(pm => <option key={pm.id} value={pm.name}>{pm.name}</option>)}
           </select>
           <select className="form-control" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
             <option value="Semua">Semua Status</option>
