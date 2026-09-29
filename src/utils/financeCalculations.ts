@@ -28,19 +28,19 @@ export const calculateFinancialSummary = (
   const dailyExpenseTotal = dailyExpensesArr.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const installmentPaymentTotal = installmentPaymentsArr.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   
-  const totalActualExpense = dailyExpenseTotal + installmentPaymentTotal;
-  
-  const cashFlow = totalIncome - totalActualExpense;
-  
-  const savingRate = totalIncome > 0 ? (cashFlow / totalIncome) * 100 : 0;
-  const expenseRatio = totalIncome > 0 ? (totalActualExpense / totalIncome) * 100 : 0;
-  
   // Active installments are those with remaining_installments > 0
   const activeInstallments = installments.filter(i => (Number(i.remaining_installments) || 0) > 0);
   const totalMonthlyInstallment = activeInstallments.reduce((acc, curr) => acc + (Number(curr.monthly_payment) || 0), 0);
   const debtRatio = totalIncome > 0 ? (totalMonthlyInstallment / totalIncome) * 100 : 0;
   
   const totalOutstanding = activeInstallments.reduce((acc, curr) => acc + (Number(curr.outstanding) || 0), 0);
+  
+  const totalActualExpense = dailyExpenseTotal + totalMonthlyInstallment;
+  
+  const cashFlow = totalIncome - totalActualExpense;
+  
+  const savingRate = totalIncome > 0 ? (cashFlow / totalIncome) * 100 : 0;
+  const expenseRatio = totalIncome > 0 ? (totalActualExpense / totalIncome) * 100 : 0;
 
   return {
     totalIncome,
