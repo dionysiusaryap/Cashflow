@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 
-const COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#64748b'];
+const COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#64748b', '#ef4444', '#14b8a6', '#84cc16', '#f97316'];
 
 const Dashboard = () => {
   const { 
@@ -44,7 +44,7 @@ const Dashboard = () => {
   const categoryData = Object.keys(expenseByCategory).map(key => ({
     name: key,
     value: expenseByCategory[key]
-  })).sort((a, b) => b.value - a.value).slice(0, 5);
+  })).sort((a, b) => b.value - a.value).slice(0, 10);
 
   const last6Months = getLast6FinancialPeriods(currentMonthStr);
   const trendData = last6Months.map(m => {
