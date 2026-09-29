@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
+import { getFinancialPeriod, formatPeriodToMonthYear } from '../utils/dateUtils';
 import { MdAdd, MdDelete, MdPayment, MdEdit } from 'react-icons/md';
 
 const Cicilan = () => {
@@ -14,6 +15,10 @@ const Cicilan = () => {
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState('Semua');
+  const [filterStatus, setFilterStatus] = useState('Semua');
+  const [filterMonth, setFilterMonth] = useState('Semua');
   const [sortBy, setSortBy] = useState('terbaru');
   const [formData, setFormData] = useState({
     name: '',
@@ -27,6 +32,21 @@ const Cicilan = () => {
   });
 
   const types = categories.map(c => c.name);
+
+  // Generate available months for filter based on due_dates and current month
+  const allDates = installments.map(i => i.due_date);
+  allDates.push(new Date().toISOString());
+  const availableMonths = Array.from(new Set(allDates.map(d => getFinancialPeriod(d)))).sort().reverse();
+
+  const filteredInstallments = installments.filter(inst => {
+    const matchesSearch = inst.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          (inst.notes && inst.notes.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesType = filterType === 'Semua' || inst.type === filterType;
+    const matchesStatus = filterStatus === 'Semua' || inst.status === filterStatus;
+    const matchesMonth = filterMonth === 'Semua' || getFinancialPeriod(inst.due_date) === filterMonth;
+    
+    return matchesSearch && matchesType && matchesStatus && matchesMonth;
+  });
 
   const closeModal = () => {
     setIsModalOpen(false);
@@ -227,7 +247,33 @@ const Cicilan = () => {
       <div className="card">
         <div className="flex justify-between align-center mb-4">
           <h3 style={{ margin: 0 }}>Daftar Cicilan Aktif</h3>
-          <select className="form-control" style={{ width: 'auto' }} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+        </div>
+        
+        <div className="grid grid-cols-5 gap-2 mb-4">
+          <input 
+            type="text" 
+            className="form-control" 
+            placeholder="Cari nama cicilan..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <select className="form-control" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+            <option value="Semua">Semua Jenis</option>
+            {types.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select className="form-control" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <option value="Semua">Semua Status</option>
+            <option value="Aman">Aman</option>
+            <option value="Segera jatuh tempo">Segera jatuh tempo</option>
+            <option value="Jatuh tempo hari ini">Jatuh tempo hari ini</option>
+            <option value="Terlambat">Terlambat</option>
+            <option value="Lunas">Lunas</option>
+          </select>
+          <select className="form-control" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+            <option value="Semua">Semua Bulan (Jatuh Tempo)</option>
+            {availableMonths.map(m => <option key={m} value={m}>{formatPeriodToMonthYear(m)}</option>)}
+          </select>
+          <select className="form-control" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
             <option value="terbaru">Jatuh Tempo Terdekat</option>
             <option value="terlama">Jatuh Tempo Terjauh</option>
             <option value="abjad-a-z">Abjad A-Z</option>
@@ -237,8 +283,8 @@ const Cicilan = () => {
           </select>
         </div>
         
-        {installments.length === 0 ? (
-          <p className="text-secondary text-center">Tidak ada data cicilan aktif.</p>
+        {filteredInstallments.length === 0 ? (
+          <p className="text-secondary text-center">Tidak ada data cicilan yang sesuai.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table">
@@ -254,7 +300,7 @@ const Cicilan = () => {
                 </tr>
               </thead>
               <tbody>
-                {installments.sort((a, b) => {
+                {filteredInstallments.sort((a, b) => {
                   if (sortBy === 'terbaru') return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
                   if (sortBy === 'terlama') return new Date(b.due_date).getTime() - new Date(a.due_date).getTime();
                   if (sortBy === 'abjad-a-z') return a.name.localeCompare(b.name);
