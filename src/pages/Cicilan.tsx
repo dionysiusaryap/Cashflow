@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
-import { getFinancialPeriod, formatPeriodToMonthYear } from '../utils/dateUtils';
 import { MdAdd, MdDelete, MdPayment, MdEdit } from 'react-icons/md';
 
 const Cicilan = () => {
@@ -15,13 +14,7 @@ const Cicilan = () => {
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('Semua');
-  const [filterPaymentMethod, setFilterPaymentMethod] = useState('Semua');
-  const [filterStatus, setFilterStatus] = useState('Semua');
-  
-  const currentMonthStr = getFinancialPeriod(new Date());
-  const [filterMonth, setFilterMonth] = useState(currentMonthStr);
   const [sortBy, setSortBy] = useState('terbaru');
   const [formData, setFormData] = useState({
     name: '',
@@ -34,22 +27,12 @@ const Cicilan = () => {
     notes: ''
   });
 
-  const types = categories.map(c => c.name);
-
-  // Generate available months for filter based on due_dates and current month
-  const allDates = installments.map(i => i.due_date);
-  allDates.push(new Date().toISOString());
-  const availableMonths = Array.from(new Set(allDates.map(d => getFinancialPeriod(d)))).sort().reverse();
+  // Memastikan jenis cicilan historis (seperti Spaylater dll) tetap muncul meski kategorinya sudah terhapus
+  const uniqueTypes = Array.from(new Set(installments.map(i => i.type))).filter(Boolean);
+  const types = Array.from(new Set([...categories.map(c => c.name), ...uniqueTypes]));
 
   const filteredInstallments = installments.filter(inst => {
-    const matchesSearch = inst.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          (inst.notes && inst.notes.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesType = filterType === 'Semua' || inst.type === filterType;
-    const matchesPaymentMethod = filterPaymentMethod === 'Semua' || inst.payment_method === filterPaymentMethod;
-    const matchesStatus = filterStatus === 'Semua' || inst.status === filterStatus;
-    const matchesMonth = filterMonth === 'Semua' || getFinancialPeriod(inst.due_date) === filterMonth;
-    
-    return matchesSearch && matchesType && matchesPaymentMethod && matchesStatus && matchesMonth;
+    return filterType === 'Semua' || inst.type === filterType;
   });
 
   const closeModal = () => {
@@ -251,44 +234,20 @@ const Cicilan = () => {
       <div className="card">
         <div className="flex justify-between align-center mb-4">
           <h3 style={{ margin: 0 }}>Daftar Cicilan Aktif</h3>
-        </div>
-        
-        <div className="grid grid-cols-6 gap-2 mb-4">
-          <input 
-            type="text" 
-            className="form-control" 
-            placeholder="Cari nama cicilan..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          <select className="form-control" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-            <option value="Semua">Semua Jenis</option>
-            {types.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <select className="form-control" value={filterPaymentMethod} onChange={(e) => setFilterPaymentMethod(e.target.value)}>
-            <option value="Semua">Semua Pembayaran</option>
-            {paymentMethods.map(pm => <option key={pm.id} value={pm.name}>{pm.name}</option>)}
-          </select>
-          <select className="form-control" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-            <option value="Semua">Semua Status</option>
-            <option value="Aman">Aman</option>
-            <option value="Segera jatuh tempo">Segera jatuh tempo</option>
-            <option value="Jatuh tempo hari ini">Jatuh tempo hari ini</option>
-            <option value="Terlambat">Terlambat</option>
-            <option value="Lunas">Lunas</option>
-          </select>
-          <select className="form-control" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
-            <option value="Semua">Semua Bulan (Jatuh Tempo)</option>
-            {availableMonths.map(m => <option key={m} value={m}>{formatPeriodToMonthYear(m)}</option>)}
-          </select>
-          <select className="form-control" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-            <option value="terbaru">Jatuh Tempo Terdekat</option>
-            <option value="terlama">Jatuh Tempo Terjauh</option>
-            <option value="abjad-a-z">Abjad A-Z</option>
-            <option value="abjad-z-a">Abjad Z-A</option>
-            <option value="nominal-terbesar">Tagihan Terbesar</option>
-            <option value="nominal-terkecil">Tagihan Terkecil</option>
-          </select>
+          <div className="flex gap-2">
+            <select className="form-control" style={{ width: 'auto' }} value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+              <option value="Semua">Semua Jenis Cicilan</option>
+              {types.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select className="form-control" style={{ width: 'auto' }} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="terbaru">Jatuh Tempo Terdekat</option>
+              <option value="terlama">Jatuh Tempo Terjauh</option>
+              <option value="abjad-a-z">Abjad A-Z</option>
+              <option value="abjad-z-a">Abjad Z-A</option>
+              <option value="nominal-terbesar">Tagihan Terbesar</option>
+              <option value="nominal-terkecil">Tagihan Terkecil</option>
+            </select>
+          </div>
         </div>
         
         {filteredInstallments.length === 0 ? (
