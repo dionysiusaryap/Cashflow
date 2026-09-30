@@ -38,7 +38,7 @@ const Cicilan = () => {
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      setSelectedIds(filteredInstallments.map(inst => inst.id));
+      setSelectedIds(filteredInstallments.map(inst => inst.id as string));
     } else {
       setSelectedIds([]);
     }
@@ -299,12 +299,12 @@ const Cicilan = () => {
                   if (sortBy === 'nominal-terkecil') return a.monthly_payment - b.monthly_payment;
                   return 0;
                 }).map((inst) => (
-                  <tr key={inst.id} style={selectedIds.includes(inst.id) ? { backgroundColor: 'var(--bg-color)' } : {}}>
+                  <tr key={inst.id} style={inst.id && selectedIds.includes(inst.id) ? { backgroundColor: 'var(--bg-color)' } : {}}>
                     <td style={{ textAlign: 'center' }}>
                       <input 
                         type="checkbox" 
-                        checked={selectedIds.includes(inst.id)}
-                        onChange={() => handleSelectRow(inst.id)}
+                        checked={inst.id ? selectedIds.includes(inst.id) : false}
+                        onChange={() => inst.id && handleSelectRow(inst.id)}
                         style={{ cursor: 'pointer' }}
                       />
                     </td>
