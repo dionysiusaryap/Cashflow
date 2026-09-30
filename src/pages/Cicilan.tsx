@@ -16,6 +16,7 @@ const Cicilan = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState('Semua');
   const [sortBy, setSortBy] = useState('terbaru');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     type: defaultCategory,
@@ -34,6 +35,20 @@ const Cicilan = () => {
   const filteredInstallments = installments.filter(inst => {
     return filterType === 'Semua' || inst.type === filterType;
   });
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedIds(filteredInstallments.map(inst => inst.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectRow = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
 
   const closeModal = () => {
     setIsModalOpen(false);
@@ -257,6 +272,14 @@ const Cicilan = () => {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th style={{ width: '40px', textAlign: 'center' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={filteredInstallments.length > 0 && selectedIds.length === filteredInstallments.length}
+                      onChange={handleSelectAll}
+                      style={{ cursor: 'pointer' }}
+                    />
+                  </th>
                   <th>Nama Cicilan</th>
                   <th>Progress</th>
                   <th>Jatuh Tempo</th>
@@ -276,7 +299,15 @@ const Cicilan = () => {
                   if (sortBy === 'nominal-terkecil') return a.monthly_payment - b.monthly_payment;
                   return 0;
                 }).map((inst) => (
-                  <tr key={inst.id}>
+                  <tr key={inst.id} style={selectedIds.includes(inst.id) ? { backgroundColor: 'var(--bg-color)' } : {}}>
+                    <td style={{ textAlign: 'center' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.includes(inst.id)}
+                        onChange={() => handleSelectRow(inst.id)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </td>
                     <td>
                       <div style={{ fontWeight: 600 }}>{inst.name}</div>
                       <div className="text-secondary" style={{ fontSize: '0.75rem' }}>{inst.type}</div>
