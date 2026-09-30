@@ -5,13 +5,13 @@ import { MdAdd, MdDelete, MdPayment, MdEdit } from 'react-icons/md';
 
 const Cicilan = () => {
   const { installments, totalMonthlyInstallment, totalOutstanding, categories: allCategories, paymentMethods: allPaymentMethods, addInstallment, updateInstallment, deleteInstallment, addExpense } = useAppStore();
-  
+
   const categories = allCategories.filter(c => c.type === 'installment' && c.isActive === 1);
   const paymentMethods = allPaymentMethods.filter(pm => pm.isActive === 1);
-  
+
   const defaultCategory = categories.length > 0 ? categories[0].name : '';
   const defaultPaymentMethod = paymentMethods.length > 0 ? paymentMethods[0].name : '';
-  
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState('Semua');
@@ -45,7 +45,7 @@ const Cicilan = () => {
   };
 
   const handleSelectRow = (id: string) => {
-    setSelectedIds(prev => 
+    setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
   };
@@ -87,7 +87,7 @@ const Cicilan = () => {
     const initialAmount = Number(formData.initial_amount);
     const tenor = Number(formData.tenor);
     const monthlyPayment = Number(formData.monthly_payment);
-    
+
     const typeToSave = formData.type || defaultCategory;
     const paymentMethodToSave = formData.payment_method || defaultPaymentMethod;
 
@@ -108,7 +108,7 @@ const Cicilan = () => {
       if (existing) {
         const newRemaining = Math.max(0, tenor - existing.paid_installments);
         const newOutstanding = Math.max(0, initialAmount - (existing.paid_installments * monthlyPayment));
-        
+
         await updateInstallment(editingId, {
           ...payload,
           remaining_installments: newRemaining,
@@ -141,7 +141,7 @@ const Cicilan = () => {
       const newRemaining = inst.remaining_installments - 1;
       const newOutstanding = Math.max(0, inst.outstanding - inst.monthly_payment);
       const newStatus = newRemaining === 0 ? 'Lunas' : 'Aman';
-      
+
       // Calculate next due date (+1 month)
       const currentDueDate = new Date(inst.due_date);
       currentDueDate.setMonth(currentDueDate.getMonth() + 1);
@@ -165,7 +165,7 @@ const Cicilan = () => {
         installment_id: inst.id,
         timestamp: Date.now()
       });
-      
+
       alert('Berhasil! Pembayaran cicilan telah dicatat dan otomatis masuk ke daftar pengeluaran.');
     }
   };
@@ -180,7 +180,7 @@ const Cicilan = () => {
     switch (status) {
       case 'Aman': return 'var(--success-color)';
       case 'Segera jatuh tempo': return 'var(--warning-color)';
-      case 'Jatuh tempo hari ini': 
+      case 'Jatuh tempo hari ini':
       case 'Terlambat': return 'var(--danger-color)';
       case 'Lunas': return 'var(--primary-color)';
       default: return 'var(--text-secondary)';
@@ -264,7 +264,7 @@ const Cicilan = () => {
             </select>
           </div>
         </div>
-        
+
         {filteredInstallments.length === 0 ? (
           <p className="text-secondary text-center">Tidak ada data cicilan yang sesuai.</p>
         ) : (
@@ -273,8 +273,8 @@ const Cicilan = () => {
               <thead>
                 <tr>
                   <th style={{ width: '40px', textAlign: 'center' }}>
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       checked={filteredInstallments.length > 0 && selectedIds.length === filteredInstallments.length}
                       onChange={handleSelectAll}
                       style={{ cursor: 'pointer' }}
@@ -301,8 +301,8 @@ const Cicilan = () => {
                 }).map((inst) => (
                   <tr key={inst.id} style={inst.id && selectedIds.includes(inst.id) ? { backgroundColor: 'var(--bg-color)' } : {}}>
                     <td style={{ textAlign: 'center' }}>
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         checked={inst.id ? selectedIds.includes(inst.id) : false}
                         onChange={() => inst.id && handleSelectRow(inst.id)}
                         style={{ cursor: 'pointer' }}
@@ -317,11 +317,11 @@ const Cicilan = () => {
                         {inst.paid_installments} / {inst.tenor} bulan
                       </div>
                       <div style={{ width: '100%', height: '8px', background: 'var(--border-color)', borderRadius: '4px', marginTop: '4px' }}>
-                        <div style={{ 
-                          width: `${(inst.paid_installments / inst.tenor) * 100}%`, 
-                          height: '100%', 
-                          background: 'var(--primary-color)', 
-                          borderRadius: '4px' 
+                        <div style={{
+                          width: `${(inst.paid_installments / inst.tenor) * 100}%`,
+                          height: '100%',
+                          background: 'var(--primary-color)',
+                          borderRadius: '4px'
                         }}></div>
                       </div>
                     </td>
@@ -345,7 +345,7 @@ const Cicilan = () => {
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <div className="flex justify-center gap-2">
-                        <button 
+                        <button
                           onClick={() => handlePay(inst)}
                           className="btn btn-primary"
                           style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}
@@ -354,14 +354,14 @@ const Cicilan = () => {
                         >
                           <MdPayment /> Bayar
                         </button>
-                        <button 
+                        <button
                           onClick={() => openEditModal(inst)}
                           style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer', fontSize: '1.25rem' }}
                           title="Edit"
                         >
                           <MdEdit />
                         </button>
-                        <button 
+                        <button
                           onClick={() => handleDelete(inst.id)}
                           style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer', fontSize: '1.25rem' }}
                           title="Hapus"
@@ -385,27 +385,27 @@ const Cicilan = () => {
               <h2 className="modal-title">{editingId ? 'Edit Cicilan' : 'Tambah Cicilan / Hutang'}</h2>
               <button className="close-btn" onClick={closeModal}>&times;</button>
             </div>
-            
+
             <form onSubmit={handleSubmit}>
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group">
                   <label className="form-label">Nama Cicilan</label>
-                  <input 
-                    type="text" 
-                    className="form-control" 
+                  <input
+                    type="text"
+                    className="form-control"
                     placeholder="Misal: KPR Rumah, Motor"
                     value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
                   />
                 </div>
-                
+
                 <div className="form-group">
                   <label className="form-label">Jenis</label>
-                  <select 
+                  <select
                     className="form-control"
                     value={formData.type || defaultCategory}
-                    onChange={(e) => setFormData({...formData, type: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                   >
                     {types.map(type => <option key={type} value={type}>{type}</option>)}
                   </select>
@@ -415,27 +415,27 @@ const Cicilan = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group">
                   <label className="form-label">Total Pinjaman Pokok (Rp)</label>
-                  <input 
-                    type="number" 
-                    className="form-control" 
+                  <input
+                    type="number"
+                    className="form-control"
                     placeholder="0.00"
                     min="0"
                     step="0.01"
                     value={formData.initial_amount}
-                    onChange={(e) => setFormData({...formData, initial_amount: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, initial_amount: e.target.value })}
                     required
                   />
                 </div>
 
                 <div className="form-group">
                   <label className="form-label">Tenor (Bulan)</label>
-                  <input 
-                    type="number" 
-                    className="form-control" 
+                  <input
+                    type="number"
+                    className="form-control"
                     placeholder="0"
                     min="1"
                     value={formData.tenor}
-                    onChange={(e) => setFormData({...formData, tenor: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, tenor: e.target.value })}
                     required
                   />
                 </div>
@@ -444,55 +444,55 @@ const Cicilan = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group">
                   <label className="form-label">Tagihan per Bulan (Rp)</label>
-                  <input 
-                    type="number" 
-                    className="form-control" 
+                  <input
+                    type="number"
+                    className="form-control"
                     placeholder="0.00"
                     min="0"
                     step="0.01"
                     value={formData.monthly_payment}
-                    onChange={(e) => setFormData({...formData, monthly_payment: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, monthly_payment: e.target.value })}
                     required
                   />
                 </div>
 
                 <div className="form-group">
                   <label className="form-label">Metode Pembayaran</label>
-                  <select 
+                  <select
                     className="form-control"
                     value={formData.payment_method || defaultPaymentMethod}
-                    onChange={(e) => setFormData({...formData, payment_method: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })}
                   >
                     {paymentMethods.map(method => <option key={method.id} value={method.name}>{method.name}</option>)}
                   </select>
                 </div>
               </div>
-              
+
               <div className="form-group">
                 <label className="form-label">Jatuh Tempo Pembayaran Pertama</label>
-                <input 
-                  type="date" 
-                  className="form-control" 
+                <input
+                  type="date"
+                  className="form-control"
                   value={formData.due_date}
-                  onChange={(e) => setFormData({...formData, due_date: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
                   required
                 />
               </div>
-              
+
               <div className="form-group">
                 <label className="form-label">Catatan</label>
-                <textarea 
-                  className="form-control" 
+                <textarea
+                  className="form-control"
                   rows={2}
                   placeholder="Opsional"
                   value={formData.notes}
-                  onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 ></textarea>
               </div>
-              
+
               <div className="flex justify-between mt-4">
                 <button type="button" className="btn btn-outline" onClick={closeModal}>Batal</button>
-                <button type="submit" className="btn btn-warning" style={{color: 'white'}}>{editingId ? 'Simpan Perubahan' : 'Simpan Cicilan'}</button>
+                <button type="submit" className="btn btn-warning" style={{ color: 'white' }}>{editingId ? 'Simpan Perubahan' : 'Simpan Cicilan'}</button>
               </div>
             </form>
           </div>
