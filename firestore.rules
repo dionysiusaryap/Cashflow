@@ -2,14 +2,133 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Mengizinkan read & write hanya untuk user yang terotentikasi
-    // dan terdaftar di whitelist email keluarga
-    match /{document=**} {
-      allow read, write: if request.auth != null && 
+    
+    // ============================================================
+    // 1. HELPER FUNCTIONS & AUTHENTICATION GUARD
+    // ============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isWhitelisted() {
+      return isAuthenticated() && 
         request.auth.token.email in [
           'dionysiusaryap@gmail.com', 
           'marialaksmiparahita@gmail.com'
         ];
+    }
+
+    function isValidAmount(val) {
+      return val is number && val >= 0;
+    }
+
+    function isValidOwner(val) {
+      return val in ['Suami', 'Istri', 'Bersama'];
+    }
+
+    // ============================================================
+    // 2. CORE FINANCIAL TRANSACTIONS
+    // ============================================================
+    
+    // Incomes (Pemasukan)
+    match /incomes/{docId} {
+      allow read: if isWhitelisted();
+      allow create, update: if isWhitelisted() 
+        && isValidAmount(request.resource.data.amount)
+        && request.resource.data.source is string
+        && isValidOwner(request.resource.data.owner);
+      allow delete: if isWhitelisted();
+    }
+
+    // Expenses (Pengeluaran)
+    match /expenses/{docId} {
+      allow read: if isWhitelisted();
+      allow create, update: if isWhitelisted() 
+        && isValidAmount(request.resource.data.amount)
+        && request.resource.data.category is string
+        && isValidOwner(request.resource.data.owner);
+      allow delete: if isWhitelisted();
+    }
+
+    // Installments (Cicilan / Kewajiban Utang)
+    match /installments/{docId} {
+      allow read: if isWhitelisted();
+      allow create, update: if isWhitelisted() 
+        && isValidAmount(request.resource.data.initial_amount)
+        && isValidAmount(request.resource.data.outstanding)
+        && isValidAmount(request.resource.data.monthly_payment)
+        && request.resource.data.name is string;
+      allow delete: if isWhitelisted();
+    }
+
+    // Financial Accounts (Rekening Bank, Kas, Dompet, CC)
+    match /financialAccounts/{docId} {
+      allow read: if isWhitelisted();
+      allow create, update: if isWhitelisted() 
+        && request.resource.data.current_balance is number
+        && request.resource.data.name is string
+        && isValidOwner(request.resource.data.owner);
+      allow delete: if isWhitelisted();
+    }
+
+    // Debt Statements (Tagihan Berkala Kartu Kredit / PayLater)
+    match /debtStatements/{docId} {
+      allow read: if isWhitelisted();
+      allow create, update: if isWhitelisted() 
+        && isValidAmount(request.resource.data.closing_balance)
+        && isValidAmount(request.resource.data.paid_amount);
+      allow delete: if isWhitelisted();
+    }
+
+    // Debt Transactions (Mutasi & Histori Pembayaran Utang)
+    match /debtTransactions/{docId} {
+      allow read: if isWhitelisted();
+      allow create: if isWhitelisted() && isValidAmount(request.resource.data.total_amount);
+      allow update, delete: if isWhitelisted();
+    }
+
+    // Transfers (Transfer Antar Rekening)
+    match /transfers/{docId} {
+      allow read: if isWhitelisted();
+      allow create, update: if isWhitelisted() && isValidAmount(request.resource.data.amount);
+      allow delete: if isWhitelisted();
+    }
+
+    // ============================================================
+    // 3. MASTER DATA & SETTINGS
+    // ============================================================
+    match /categories/{docId} {
+      allow read: if isWhitelisted();
+      allow write: if isWhitelisted();
+    }
+
+    match /paymentMethods/{docId} {
+      allow read: if isWhitelisted();
+      allow write: if isWhitelisted();
+    }
+
+    match /appSettings/{docId} {
+      allow read: if isWhitelisted();
+      allow write: if isWhitelisted();
+    }
+
+    // ============================================================
+    // 4. AUDIT LOGS (IMMUTABLE / APPEND-ONLY)
+    // Non-repudiation: Audit log hanya boleh ditulis baru (create),
+    // dilarang keras untuk diedit (update) atau dihapus (delete).
+    // ============================================================
+    match /auditLogs/{docId} {
+      allow read: if isWhitelisted();
+      allow create: if isWhitelisted() && request.resource.data.entity_type is string;
+      allow update, delete: if false;
+    }
+
+    // ============================================================
+    // 5. DEFAULT DENY
+    // Tolak semua akses ke dokumen di luar skema koleksi resmi
+    // ============================================================
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
