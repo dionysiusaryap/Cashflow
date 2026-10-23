@@ -15,6 +15,7 @@ import type {
   AuditLog
 } from '../types/finance';
 import { calculateNextMonthlyDueDate, calculatePreviousMonthlyDueDate } from '../utils/dateUtils';
+import { sanitizePayload } from '../utils/firestoreSanitizer';
 
 /**
  * Service Finansial Terpusat (Central Financial Domain Service).
@@ -57,7 +58,7 @@ export const financialService = {
     const nextDueDate = newStatus === 'Lunas' ? installment.due_date : calculateNextMonthlyDueDate(installment.due_date);
 
     // 2. Siapkan payload pengeluaran
-    const expensePayload: Omit<Expense, 'id'> = {
+    const expensePayload: Omit<Expense, 'id'> = sanitizePayload({
       date: paymentDate,
       category: 'Tagihan & Utilitas',
       payment_method: paymentMethod,
@@ -69,19 +70,19 @@ export const financialService = {
       expense_type: 'DebtPayment',
       notes,
       timestamp: Date.now()
-    };
+    });
 
     // 3. Simpan Expense ke Firestore
     const expenseRef = await addDoc(collection(db, 'expenses'), expensePayload);
 
     // 4. Update status cicilan di Firestore
-    await updateDoc(doc(db, 'installments', installment.id), {
+    await updateDoc(doc(db, 'installments', installment.id), sanitizePayload({
       paid_installments: newPaid,
       remaining_installments: newRemaining,
       outstanding: newOutstanding,
       due_date: nextDueDate,
       status: newStatus
-    });
+    }));
 
     // 5. Kurangi saldo akun sumber (jika ada akun terpilih)
     if (sourceAccountId) {
@@ -101,7 +102,7 @@ export const financialService = {
 
     // 6. Catat Audit Log
     try {
-      const auditPayload: Omit<AuditLog, 'id'> = {
+      const auditPayload: Omit<AuditLog, 'id'> = sanitizePayload({
         entity_type: 'Installment',
         entity_id: installment.id,
         action: 'PAYMENT',
@@ -119,9 +120,9 @@ export const financialService = {
           due_date: nextDueDate,
           expense_id: expenseRef.id
         },
-        performed_by: userEmail,
+        performed_by: userEmail || 'system',
         timestamp: Date.now()
-      };
+      });
       await addDoc(collection(db, 'auditLogs'), auditPayload);
     } catch {
       // Non-blocking jika audit log gagal
@@ -183,15 +184,15 @@ export const financialService = {
 
     // 4. Audit Log
     try {
-      await addDoc(collection(db, 'auditLogs'), {
+      await addDoc(collection(db, 'auditLogs'), sanitizePayload({
         entity_type: 'Expense',
         entity_id: expense.id,
         action: 'REVERSAL',
         summary: `Pengeluaran ${expense.description || expense.category} sebesar Rp${expense.amount.toLocaleString('id-ID')} dihapus dan direverse.`,
         previous_state: expense,
-        performed_by: userEmail,
+        performed_by: userEmail || 'system',
         timestamp: Date.now()
-      });
+      }));
     } catch {
       // Ignore audit fail
     }
@@ -221,10 +222,10 @@ export const financialService = {
         const newOutstanding = Math.max(0, (linkedInst.outstanding || 0) - delta);
         const newStatus = newOutstanding === 0 ? 'Lunas' : 'Aman';
 
-        await updateDoc(doc(db, 'installments', linkedInst.id), {
+        await updateDoc(doc(db, 'installments', linkedInst.id), sanitizePayload({
           outstanding: newOutstanding,
           status: newStatus
-        });
+        }));
       }
     }
 
@@ -247,20 +248,20 @@ export const financialService = {
     }
 
     // 3. Update dokumen expense di Firestore
-    await updateDoc(doc(db, 'expenses', expenseId), updatedData);
+    await updateDoc(doc(db, 'expenses', expenseId), sanitizePayload(updatedData));
 
     // 4. Catat Audit Log
     try {
-      await addDoc(collection(db, 'auditLogs'), {
+      await addDoc(collection(db, 'auditLogs'), sanitizePayload({
         entity_type: 'Expense',
         entity_id: expenseId,
         action: 'UPDATE',
         summary: `Pengeluaran ${oldExpense.description || oldExpense.category} diedit dari Rp${oldExpense.amount.toLocaleString('id-ID')} menjadi Rp${newAmount.toLocaleString('id-ID')}`,
         previous_state: oldExpense,
         new_state: updatedData,
-        performed_by: userEmail,
+        performed_by: userEmail || 'system',
         timestamp: Date.now()
-      });
+      }));
     } catch {
       // Non-blocking
     }
@@ -285,7 +286,7 @@ export const financialService = {
     const newStatus = newPaidAmount >= statement.closing_balance ? 'Paid' : 'Partially Paid';
 
     // 1. Catat Expense bertipe BillSettlement
-    await addDoc(collection(db, 'expenses'), {
+    await addDoc(collection(db, 'expenses'), sanitizePayload({
       date: paymentDate,
       category: 'Pembayaran Tagihan CC/SPaylater',
       payment_method: paymentMethod,
@@ -296,13 +297,13 @@ export const financialService = {
       source_account_id: sourceAccountId,
       expense_type: 'BillSettlement',
       timestamp: Date.now()
-    });
+    }));
 
     // 2. Update Statement
-    await updateDoc(doc(db, 'debtStatements', statement.id), {
+    await updateDoc(doc(db, 'debtStatements', statement.id), sanitizePayload({
       paid_amount: newPaidAmount,
       status: newStatus
-    });
+    }));
 
     // 3. Potong saldo akun sumber kas
     if (sourceAccountId) {
@@ -322,14 +323,14 @@ export const financialService = {
 
     // 4. Catat Audit Log
     try {
-      await addDoc(collection(db, 'auditLogs'), {
+      await addDoc(collection(db, 'auditLogs'), sanitizePayload({
         entity_type: 'DebtStatement',
         entity_id: statement.id,
         action: 'PAYMENT',
         summary: `Pelunasan tagihan ${statement.debt_account_id} (${statement.statement_period}) sebesar Rp${paymentAmount.toLocaleString('id-ID')}`,
-        performed_by: userEmail,
+        performed_by: userEmail || 'system',
         timestamp: Date.now()
-      });
+      }));
     } catch {
       // Non-blocking
     }
@@ -352,7 +353,7 @@ export const financialService = {
     const { fromAccountId, toAccountId, amount, date, fee = 0, description, owner = 'Bersama', userEmail } = params;
 
     // 1. Simpan rekaman transfer
-    const transferPayload: Omit<Transfer, 'id'> = {
+    const transferPayload: Omit<Transfer, 'id'> = sanitizePayload({
       from_account_id: fromAccountId,
       to_account_id: toAccountId,
       amount,
@@ -361,7 +362,7 @@ export const financialService = {
       description,
       owner,
       timestamp: Date.now()
-    };
+    });
     await addDoc(collection(db, 'transfers'), transferPayload);
 
     // 2. Update saldo kedua rekening
@@ -383,7 +384,7 @@ export const financialService = {
 
     // 3. Jika ada biaya transfer (fee), catat fee sebagai beban ekonomi
     if (fee > 0) {
-      await addDoc(collection(db, 'expenses'), {
+      await addDoc(collection(db, 'expenses'), sanitizePayload({
         date,
         category: 'Biaya Admin & Transaksi',
         payment_method: 'Transfer Bank',
@@ -393,19 +394,19 @@ export const financialService = {
         source_account_id: fromAccountId,
         expense_type: 'FeeOrInterest',
         timestamp: Date.now()
-      });
+      }));
     }
 
     // 4. Catat Audit Log
     try {
-      await addDoc(collection(db, 'auditLogs'), {
+      await addDoc(collection(db, 'auditLogs'), sanitizePayload({
         entity_type: 'Transfer',
         entity_id: fromAccountId,
         action: 'UPDATE',
         summary: `Transfer dana sebesar Rp${amount.toLocaleString('id-ID')} (${description || ''})`,
-        performed_by: userEmail,
+        performed_by: userEmail || 'system',
         timestamp: Date.now()
-      });
+      }));
     } catch {
       // Non-blocking
     }

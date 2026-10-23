@@ -152,9 +152,12 @@ const Pengeluaran = () => {
       amount: Number(formData.amount),
       description: formData.description,
       expense_type: formData.expense_type,
-      source_account_id: formData.source_account_id || undefined,
       timestamp: getCurrentTimestamp()
     };
+
+    if (formData.source_account_id) {
+      payload.source_account_id = formData.source_account_id;
+    }
 
     if (editingId) {
       const oldExpense = expenses.find(e => e.id === editingId);

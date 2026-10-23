@@ -25,6 +25,7 @@ import type {
   AuditLog
 } from '../types/finance';
 import { financialService } from '../services/financialService';
+import { sanitizePayload } from '../utils/firestoreSanitizer';
 
 // Re-export types untuk backward-compatibility dengan komponen yang sudah ada
 export type {
@@ -192,40 +193,50 @@ export const useAppStore = create<AppState>((set, get) => {
     debtRatio: 0,
 
     addIncome: async (income) => {
-      const ref = await addDoc(collection(db, 'incomes'), income);
+      const clean = sanitizePayload(income);
+      const ref = await addDoc(collection(db, 'incomes'), clean);
       return ref.id;
     },
-    updateIncome: async (id, income) => { await updateDoc(doc(db, 'incomes', id), income); },
+    updateIncome: async (id, income) => { 
+      await updateDoc(doc(db, 'incomes', id), sanitizePayload(income)); 
+    },
     deleteIncome: async (id) => { await deleteDoc(doc(db, 'incomes', id)); },
     
     addExpense: async (expense) => {
-      const ref = await addDoc(collection(db, 'expenses'), expense);
+      const clean = sanitizePayload(expense);
+      const ref = await addDoc(collection(db, 'expenses'), clean);
       return ref.id;
     },
     deleteExpense: async (id) => { await deleteDoc(doc(db, 'expenses', id)); },
-    updateExpense: async (id, expense) => { await updateDoc(doc(db, 'expenses', id), expense); },
+    updateExpense: async (id, expense) => { 
+      await updateDoc(doc(db, 'expenses', id), sanitizePayload(expense)); 
+    },
     
     addInstallment: async (inst) => {
-      const ref = await addDoc(collection(db, 'installments'), inst);
+      const clean = sanitizePayload(inst);
+      const ref = await addDoc(collection(db, 'installments'), clean);
       return ref.id;
     },
     deleteInstallment: async (id) => { await deleteDoc(doc(db, 'installments', id)); },
-    updateInstallment: async (id, inst) => { await updateDoc(doc(db, 'installments', id), inst); },
+    updateInstallment: async (id, inst) => { 
+      await updateDoc(doc(db, 'installments', id), sanitizePayload(inst)); 
+    },
     
-    addCategory: async (category) => { await addDoc(collection(db, 'categories'), category); },
-    updateCategory: async (id, category) => { await updateDoc(doc(db, 'categories', id), category); },
+    addCategory: async (category) => { await addDoc(collection(db, 'categories'), sanitizePayload(category)); },
+    updateCategory: async (id, category) => { await updateDoc(doc(db, 'categories', id), sanitizePayload(category)); },
     deleteCategory: async (id) => { await deleteDoc(doc(db, 'categories', id)); },
     
-    addPaymentMethod: async (pm) => { await addDoc(collection(db, 'paymentMethods'), pm); },
-    updatePaymentMethod: async (id, pm) => { await updateDoc(doc(db, 'paymentMethods', id), pm); },
+    addPaymentMethod: async (pm) => { await addDoc(collection(db, 'paymentMethods'), sanitizePayload(pm)); },
+    updatePaymentMethod: async (id, pm) => { await updateDoc(doc(db, 'paymentMethods', id), sanitizePayload(pm)); },
     deletePaymentMethod: async (id) => { await deleteDoc(doc(db, 'paymentMethods', id)); },
     
-    updateSettings: async (id, settings) => { await updateDoc(doc(db, 'appSettings', id), settings); },
+    updateSettings: async (id, settings) => { await updateDoc(doc(db, 'appSettings', id), sanitizePayload(settings)); },
 
     addFinancialAccount: async (acc) => {
-      const ref = await addDoc(collection(db, 'financialAccounts'), acc);
+      const clean = sanitizePayload(acc);
+      const ref = await addDoc(collection(db, 'financialAccounts'), clean);
       set((state) => {
-        const newAcc = { ...acc, id: ref.id };
+        const newAcc = { ...clean, id: ref.id } as FinancialAccount;
         const updated = [...state.financialAccounts.filter(a => a.id !== ref.id), newAcc];
         recalcSummary(state.incomes, state.expenses, state.installments, updated, state.debtStatements);
         return { financialAccounts: updated };
@@ -233,12 +244,13 @@ export const useAppStore = create<AppState>((set, get) => {
       return ref.id;
     },
     updateFinancialAccount: async (id, acc) => {
+      const clean = sanitizePayload(acc);
       set((state) => {
-        const updated = state.financialAccounts.map((a) => (a.id === id ? { ...a, ...acc } : a));
+        const updated = state.financialAccounts.map((a) => (a.id === id ? { ...a, ...clean } : a));
         recalcSummary(state.incomes, state.expenses, state.installments, updated, state.debtStatements);
         return { financialAccounts: updated };
       });
-      await updateDoc(doc(db, 'financialAccounts', id), acc);
+      await updateDoc(doc(db, 'financialAccounts', id), clean);
     },
     deleteFinancialAccount: async (id) => {
       set((state) => {
@@ -249,8 +261,8 @@ export const useAppStore = create<AppState>((set, get) => {
       await deleteDoc(doc(db, 'financialAccounts', id));
     },
 
-    addDebtStatement: async (stmt) => { await addDoc(collection(db, 'debtStatements'), stmt); },
-    updateDebtStatement: async (id, stmt) => { await updateDoc(doc(db, 'debtStatements', id), stmt); },
+    addDebtStatement: async (stmt) => { await addDoc(collection(db, 'debtStatements'), sanitizePayload(stmt)); },
+    updateDebtStatement: async (id, stmt) => { await updateDoc(doc(db, 'debtStatements', id), sanitizePayload(stmt)); },
     deleteDebtStatement: async (id) => { await deleteDoc(doc(db, 'debtStatements', id)); },
 
     // Aksi Terpusat dengan Perlindungan Reversal

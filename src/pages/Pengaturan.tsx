@@ -161,17 +161,22 @@ const Pengaturan = () => {
 
     try {
       const accountName = newAccount.name.trim();
-      await addFinancialAccount({
+      const accountData: Omit<FinancialAccount, 'id'> = {
         name: accountName,
         type: newAccount.type,
         owner: newAccount.owner,
         currency: 'IDR',
         opening_balance: Number(newAccount.current_balance) || 0,
         current_balance: Number(newAccount.current_balance) || 0,
-        credit_limit: newAccount.credit_limit ? Number(newAccount.credit_limit) : undefined,
         isActive: 1,
         timestamp: Date.now()
-      });
+      };
+
+      if (newAccount.credit_limit && !isNaN(Number(newAccount.credit_limit))) {
+        accountData.credit_limit = Number(newAccount.credit_limit);
+      }
+
+      await addFinancialAccount(accountData);
 
       alert(`✓ Akun "${accountName}" berhasil ditambahkan!`);
 
