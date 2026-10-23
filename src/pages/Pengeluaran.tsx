@@ -1,11 +1,24 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
-import { getFinancialPeriod, formatPeriodToMonthYear } from '../utils/dateUtils';
+import { getFinancialPeriod, formatPeriodToMonthYear, getCurrentTimestamp } from '../utils/dateUtils';
+import type { Expense, ExpenseType } from '../types/finance';
 import { MdAdd, MdDelete, MdEdit } from 'react-icons/md';
 
 const Pengeluaran = () => {
-  const { expenses, dailyExpenseTotal, appSettings, categories: allCategories, paymentMethods: allPaymentMethods, addExpense, deleteExpense, updateExpense } = useAppStore();
+  const { 
+    expenses, 
+    dailyExpenseTotal, 
+    economicExpense,
+    appSettings, 
+    categories: allCategories, 
+    paymentMethods: allPaymentMethods, 
+    financialAccounts,
+    addExpense, 
+    deleteExpenseWithReversal, 
+    updateExpense,
+    updateExpenseWithAdjustment
+  } = useAppStore();
   
   const categories = allCategories.filter(c => c.type === 'expense' && c.isActive === 1);
   const paymentMethods = allPaymentMethods.filter(pm => pm.isActive === 1);
@@ -21,7 +34,9 @@ const Pengeluaran = () => {
     payment_method: defaultPaymentMethod,
     owner: 'Bersama',
     amount: '',
-    description: ''
+    description: '',
+    expense_type: 'Daily' as ExpenseType,
+    source_account_id: ''
   });
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,7 +69,6 @@ const Pengeluaran = () => {
   });
 
   const activeCategoryNames = categories.map(c => c.name);
-  const uniqueDescriptions = Array.from(new Set(expenses.map(e => e.description).filter(Boolean))) as string[];
 
   const closeModal = () => {
     setIsModalOpen(false);
@@ -65,11 +79,14 @@ const Pengeluaran = () => {
       payment_method: defaultPaymentMethod,
       owner: 'Bersama',
       amount: '',
-      description: ''
+      description: '',
+      expense_type: 'Daily',
+      source_account_id: ''
     });
   };
 
-  const openEditModal = (expense: any) => {
+  const openEditModal = (expense: Expense) => {
+    if (!expense.id) return;
     setEditingId(expense.id);
     setFormData({
       date: expense.date === 'Semua Bulan' ? 'Semua Bulan' : new Date(expense.date).toISOString().split('T')[0],
@@ -77,7 +94,9 @@ const Pengeluaran = () => {
       payment_method: expense.payment_method,
       owner: expense.owner,
       amount: expense.amount.toString(),
-      description: expense.description || ''
+      description: expense.description || '',
+      expense_type: expense.expense_type || 'Daily',
+      source_account_id: expense.source_account_id || ''
     });
     setIsModalOpen(true);
   };
@@ -85,6 +104,7 @@ const Pengeluaran = () => {
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const desc = e.target.value;
     let newCategory = formData.category;
+    let newExpenseType = formData.expense_type;
 
     const lowerDesc = desc.toLowerCase();
     
@@ -94,19 +114,22 @@ const Pengeluaran = () => {
       { category: 'Transportasi', keywords: ['bensin', 'parkir', 'tol', 'gojek', 'grab', 'kereta', 'bus', 'krl', 'ojek'] },
       { category: 'Tagihan & Utilitas', keywords: ['listrik', 'token', 'air', 'pdam', 'internet', 'wifi', 'indihome', 'bpjs', 'pulsa', 'kuota'] },
       { category: 'Kesehatan', keywords: ['obat', 'dokter', 'rumah sakit', 'klinik', 'apotek', 'vitamin'] },
-      { category: 'Belanja Pribadi', keywords: ['baju', 'celana', 'sepatu', 'skincare', 'makeup', 'salon', 'cukur'] }
+      { category: 'Pembayaran Tagihan CC/SPaylater', keywords: ['bayar tagihan cc', 'pelunasan cc', 'bayar spaylater', 'tagihan kartu kredit'] }
     ];
 
     for (const mapping of categoryMapping) {
       if (mapping.keywords.some(keyword => lowerDesc.includes(keyword))) {
-        if (activeCategoryNames.includes(mapping.category)) {
+        if (activeCategoryNames.includes(mapping.category) || mapping.category === 'Pembayaran Tagihan CC/SPaylater') {
           newCategory = mapping.category;
+          if (mapping.category === 'Pembayaran Tagihan CC/SPaylater') {
+            newExpenseType = 'BillSettlement';
+          }
           break;
         }
       }
     }
 
-    setFormData({ ...formData, description: desc, category: newCategory });
+    setFormData({ ...formData, description: desc, category: newCategory, expense_type: newExpenseType });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -121,18 +144,25 @@ const Pengeluaran = () => {
       return;
     }
 
-    const payload = {
+    const payload: Omit<Expense, 'id'> = {
       date: formData.date === 'Semua Bulan' ? 'Semua Bulan' : new Date(formData.date).toISOString(),
       category: categoryToSave,
       payment_method: paymentMethodToSave,
       owner: formData.owner as 'Suami' | 'Istri' | 'Bersama',
       amount: Number(formData.amount),
       description: formData.description,
-      timestamp: Date.now()
+      expense_type: formData.expense_type,
+      source_account_id: formData.source_account_id || undefined,
+      timestamp: getCurrentTimestamp()
     };
 
     if (editingId) {
-      await updateExpense(editingId, payload);
+      const oldExpense = expenses.find(e => e.id === editingId);
+      if (oldExpense) {
+        await updateExpenseWithAdjustment(editingId, oldExpense, payload);
+      } else {
+        await updateExpense(editingId, payload);
+      }
     } else {
       await addExpense(payload);
     }
@@ -140,9 +170,15 @@ const Pengeluaran = () => {
     closeModal();
   };
 
-  const handleDelete = async (id?: string) => {
-    if (id && window.confirm('Apakah Anda yakin ingin menghapus data pengeluaran ini?')) {
-      await deleteExpense(id);
+  // Safe deletion with automatic reversal of debt and accounts
+  const handleDelete = async (expense: Expense) => {
+    if (!expense.id) return;
+    const confirmMessage = expense.installment_id
+      ? 'PERINGATAN: Pengeluaran ini adalah bagian dari pembayaran cicilan. Menghapusnya akan otomatis mengembalikan saldo pokok utang dan tenor cicilan terkait. Lanjutkan?'
+      : 'Apakah Anda yakin ingin menghapus data pengeluaran ini?';
+
+    if (window.confirm(confirmMessage)) {
+      await deleteExpenseWithReversal(expense);
     }
   };
 
@@ -151,23 +187,28 @@ const Pengeluaran = () => {
       <div className="flex justify-between align-center mb-6">
         <div>
           <h1 className="page-title" style={{ marginBottom: '0' }}>Pengeluaran</h1>
-          <p className="text-secondary">Kelola data pengeluaran dan belanja</p>
+          <p className="text-secondary">Kelola data pengeluaran, belanja kartu kredit, dan pelunasan tagihan</p>
         </div>
-        <button className="btn btn-danger" onClick={() => { setEditingId(null); setFormData({
-          date: new Date().toISOString().split('T')[0],
-          category: defaultCategory,
-          payment_method: defaultPaymentMethod,
-          owner: 'Bersama',
-          amount: '',
-          description: ''
-        }); setIsModalOpen(true); }}>
+        <button className="btn btn-danger" onClick={() => { setEditingId(null); setIsModalOpen(true); }}>
           <MdAdd /> Tambah Pengeluaran
         </button>
       </div>
 
-      <div className="card mb-4">
-        <div className="card-title">Total Pengeluaran Bulan Ini</div>
-        <div className="card-value text-danger">{formatCurrency(dailyExpenseTotal)}</div>
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="card">
+          <div className="card-title">Beban Konsumsi Ekonomi Bulan Ini</div>
+          <div className="card-value text-danger">{formatCurrency(economicExpense || dailyExpenseTotal)}</div>
+          <div className="text-secondary" style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+            Konsumsi belanja riil (Kas + Kartu Kredit), di luar pelunasan utang
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-title">Total Pengeluaran Kas/Debit</div>
+          <div className="card-value">{formatCurrency(dailyExpenseTotal)}</div>
+          <div className="text-secondary" style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+            Belanja harian non-kredit bulan berjalan
+          </div>
+        </div>
       </div>
 
       <div className="card">
@@ -203,7 +244,7 @@ const Pengeluaran = () => {
         </div>
         
         {filteredExpenses.length === 0 ? (
-          <p className="text-secondary text-center">Belum ada data pengeluaran.</p>
+          <p className="text-secondary text-center py-6">Belum ada data pengeluaran.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table">
@@ -211,7 +252,7 @@ const Pengeluaran = () => {
                 <tr>
                   <th>Tanggal</th>
                   <th>Kategori</th>
-                  <th>Metode</th>
+                  <th>Metode / Tipe</th>
                   <th>Keterangan</th>
                   <th>Pemilik</th>
                   <th style={{ textAlign: 'right' }}>Jumlah</th>
@@ -227,51 +268,65 @@ const Pengeluaran = () => {
                   if (sortBy === 'nominal-terbesar') return b.amount - a.amount;
                   if (sortBy === 'nominal-terkecil') return a.amount - b.amount;
                   return 0;
-                }).map((expense) => (
-                  <tr key={expense.id}>
-                    <td>{expense.date === 'Semua Bulan' ? 'Semua Bulan' : new Date(expense.date).toLocaleDateString('id-ID')}</td>
-                    <td style={{ fontWeight: 600 }}>{expense.category}</td>
-                    <td>
-                       <span className="badge badge-outline">
-                        {expense.payment_method}
-                      </span>
-                    </td>
-                    <td className="text-secondary">{expense.description || '-'}</td>
-                    <td>
-                      <span className="badge badge-outline">
-                        {expense.owner === 'Suami' ? appSettings?.husbandName || 'Suami' : 
-                         expense.owner === 'Istri' ? appSettings?.wifeName || 'Istri' : 'Bersama'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }} className="text-danger">
-                      {formatCurrency(expense.amount)}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <div className="flex justify-center gap-2">
-                        <button 
-                          onClick={() => openEditModal(expense)}
-                          style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer', fontSize: '1.25rem' }}
-                          title="Edit"
-                        >
-                          <MdEdit />
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(expense.id)}
-                          style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer', fontSize: '1.25rem' }}
-                          title="Hapus"
-                        >
-                          <MdDelete />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                }).map((expense) => {
+                  const isInstallment = !!expense.installment_id;
+                  const isSettlement = expense.expense_type === 'BillSettlement' || expense.category === 'Pembayaran Tagihan CC/SPaylater';
+
+                  return (
+                    <tr key={expense.id}>
+                      <td>{expense.date === 'Semua Bulan' ? 'Semua Bulan' : new Date(expense.date).toLocaleDateString('id-ID')}</td>
+                      <td>
+                        <span style={{ fontWeight: 600 }}>{expense.category}</span>
+                        {isInstallment && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)' }}>[Cicilan Pinjaman]</div>
+                        )}
+                        {isSettlement && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--success-color)' }}>[Pelunasan Tagihan]</div>
+                        )}
+                      </td>
+                      <td>
+                        <span className="badge badge-outline">
+                          {expense.payment_method}
+                        </span>
+                      </td>
+                      <td className="text-secondary">{expense.description || '-'}</td>
+                      <td>
+                        <span className="badge badge-outline">
+                          {expense.owner === 'Suami' ? appSettings?.husbandName || 'Suami' : 
+                           expense.owner === 'Istri' ? appSettings?.wifeName || 'Istri' : 'Bersama'}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }} className="text-danger">
+                        {formatCurrency(expense.amount)}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div className="flex justify-center gap-2">
+                          <button 
+                            onClick={() => openEditModal(expense)}
+                            style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer', fontSize: '1.25rem' }}
+                            title="Edit"
+                          >
+                            <MdEdit />
+                          </button>
+                          <button 
+                            onClick={() => handleDelete(expense)}
+                            style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer', fontSize: '1.25rem' }}
+                            title={isInstallment ? "Hapus dan Rollback Cicilan" : "Hapus"}
+                          >
+                            <MdDelete />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
+      {/* Modal Tambah / Edit Pengeluaran */}
       {isModalOpen && (
         <div className="modal-overlay">
           <div className="modal-content">
@@ -279,103 +334,131 @@ const Pengeluaran = () => {
               <h2 className="modal-title">{editingId ? 'Edit Pengeluaran' : 'Tambah Pengeluaran'}</h2>
               <button className="close-btn" onClick={closeModal}>&times;</button>
             </div>
-            
+
             <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label className="form-label flex justify-between">
-                  <span>Tanggal</span>
-                  <label style={{ fontWeight: 'normal', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Tanggal</label>
+                  <div className="flex gap-2">
                     <input 
-                      type="checkbox" 
-                      checked={formData.date === 'Semua Bulan'}
-                      onChange={(e) => setFormData({...formData, date: e.target.checked ? 'Semua Bulan' : new Date().toISOString().split('T')[0]})}
-                    /> Berlaku Semua Bulan
-                  </label>
-                </label>
-                {formData.date !== 'Semua Bulan' && (
-                  <input 
-                    type="date" 
-                    className="form-control" 
-                    value={formData.date}
-                    onChange={(e) => setFormData({...formData, date: e.target.value})}
-                    required
-                  />
-                )}
-                {formData.date === 'Semua Bulan' && (
-                  <input type="text" className="form-control" value="Semua Bulan" disabled />
-                )}
+                      type="date" 
+                      className="form-control" 
+                      value={formData.date === 'Semua Bulan' ? '' : formData.date} 
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                      disabled={formData.date === 'Semua Bulan'}
+                      required={formData.date !== 'Semua Bulan'}
+                    />
+                    <button 
+                      type="button" 
+                      className={`btn ${formData.date === 'Semua Bulan' ? 'btn-primary' : 'btn-outline'}`}
+                      onClick={() => setFormData({ ...formData, date: formData.date === 'Semua Bulan' ? new Date().toISOString().split('T')[0] : 'Semua Bulan' })}
+                      style={{ whiteSpace: 'nowrap', fontSize: '0.8rem', padding: '0.4rem 0.6rem' }}
+                    >
+                      Rutin
+                    </button>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Jenis Beban / Transaksi</label>
+                  <select
+                    className="form-control"
+                    value={formData.expense_type}
+                    onChange={(e) => setFormData({ ...formData, expense_type: e.target.value as ExpenseType })}
+                  >
+                    <option value="Daily">Belanja Harian (Kas/Debit/Transfer)</option>
+                    <option value="CreditPurchase">Belanja Kartu Kredit / PayLater</option>
+                    <option value="BillSettlement">Pelunasan Tagihan CC / PayLater</option>
+                  </select>
+                </div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group">
                   <label className="form-label">Kategori</label>
                   <select 
-                    className="form-control"
+                    className="form-control" 
                     value={formData.category || defaultCategory}
-                    onChange={(e) => setFormData({...formData, category: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   >
-                    {activeCategoryNames.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.name}>{cat.name}</option>
+                    ))}
+                    <option value="Pembayaran Tagihan CC/SPaylater">Pembayaran Tagihan CC/SPaylater</option>
                   </select>
                 </div>
-                
+
                 <div className="form-group">
                   <label className="form-label">Metode Pembayaran</label>
                   <select 
-                    className="form-control"
+                    className="form-control" 
                     value={formData.payment_method || defaultPaymentMethod}
-                    onChange={(e) => setFormData({...formData, payment_method: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })}
                   >
-                    {paymentMethods.map(method => <option key={method.id} value={method.name}>{method.name}</option>)}
+                    {paymentMethods.map(pm => (
+                      <option key={pm.id} value={pm.name}>{pm.name}</option>
+                    ))}
                   </select>
                 </div>
               </div>
-              
+
+              {/* Rekening Sumber Kas */}
+              {financialAccounts.length > 0 && (
+                <div className="form-group">
+                  <label className="form-label">Rekening / Akun Sumber (Opsional)</label>
+                  <select
+                    className="form-control"
+                    value={formData.source_account_id}
+                    onChange={(e) => setFormData({ ...formData, source_account_id: e.target.value })}
+                  >
+                    <option value="">Pilih Akun Sumber Dana (Opsional)</option>
+                    {financialAccounts.filter(a => a.isActive === 1).map(acc => (
+                      <option key={acc.id} value={acc.id}>{acc.name} ({acc.type}) - Saldo: {formatCurrency(acc.current_balance)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group">
-                  <label className="form-label">Jumlah (Rp)</label>
+                  <label className="form-label">Nominal (Rp)</label>
                   <input 
                     type="number" 
                     className="form-control" 
-                    placeholder="0.00"
+                    placeholder="0.00" 
                     min="0"
                     step="0.01"
                     value={formData.amount}
-                    onChange={(e) => setFormData({...formData, amount: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                     required
                   />
                 </div>
-                
+
                 <div className="form-group">
-                  <label className="form-label">Pemilik</label>
+                  <label className="form-label">Alokasi Pemilik</label>
                   <select 
-                    className="form-control"
+                    className="form-control" 
                     value={formData.owner}
-                    onChange={(e) => setFormData({...formData, owner: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, owner: e.target.value as any })}
                   >
+                    <option value="Bersama">Bersama</option>
                     <option value="Suami">{appSettings?.husbandName || 'Suami'}</option>
                     <option value="Istri">{appSettings?.wifeName || 'Istri'}</option>
-                    <option value="Bersama">Bersama</option>
                   </select>
                 </div>
               </div>
-              
+
               <div className="form-group">
-                <label className="form-label">Keterangan</label>
+                <label className="form-label">Keterangan Belanja</label>
                 <input 
                   type="text" 
                   className="form-control" 
-                  list="expense-descriptions"
-                  placeholder="Contoh: Beli Token Listrik, Belanja Mingguan..."
+                  placeholder="Misal: Belanja Sayur di Pasar"
                   value={formData.description}
                   onChange={handleDescriptionChange}
                 />
-                <datalist id="expense-descriptions">
-                  {uniqueDescriptions.map((desc, i) => (
-                    <option key={i} value={desc} />
-                  ))}
-                </datalist>
               </div>
-              
+
               <div className="flex justify-between mt-4">
                 <button type="button" className="btn btn-outline" onClick={closeModal}>Batal</button>
                 <button type="submit" className="btn btn-danger">{editingId ? 'Simpan Perubahan' : 'Simpan Pengeluaran'}</button>

@@ -1,19 +1,44 @@
 import React, { useState, useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import type { Category, PaymentMethod } from '../store/useAppStore';
-import { MdAdd, MdDownload, MdUpload, MdWarning, MdEdit, MdDelete, MdArrowUpward, MdArrowDownward } from 'react-icons/md';
-import { auth } from '../db/firebase';
-import { signOut } from 'firebase/auth';
+import type { Category, PaymentMethod, FinancialAccount, AccountType } from '../types/finance';
+import { formatCurrency } from '../utils/format';
+import { prepareBackupImport, resolveForeignKey } from '../utils/backupRestore';
+import { 
+  MdAdd, 
+  MdDownload, 
+  MdUpload, 
+  MdWarning, 
+  MdEdit, 
+  MdDelete, 
+  MdAccountBalance,
+  MdCheckCircle
+} from 'react-icons/md';
 
 const Pengaturan = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { 
-    appSettings, categories, paymentMethods, incomes, expenses, installments,
-    updateSettings, addCategory, updateCategory, deleteCategory,
-    addPaymentMethod, updatePaymentMethod, deletePaymentMethod,
-    addIncome, addExpense, addInstallment,
-    deleteIncome, deleteExpense, deleteInstallment,
-    user
+    appSettings, 
+    categories, 
+    paymentMethods, 
+    incomes, 
+    expenses, 
+    installments,
+    financialAccounts,
+    debtStatements,
+    transfers,
+    updateSettings, 
+    addCategory, 
+    updateCategory, 
+    deleteCategory,
+    addPaymentMethod, 
+    updatePaymentMethod, 
+    deletePaymentMethod,
+    addIncome, 
+    addExpense, 
+    addInstallment,
+    addFinancialAccount,
+    updateFinancialAccount,
+    deleteFinancialAccount
   } = useAppStore();
 
   // Profil Form
@@ -31,6 +56,19 @@ const Pengaturan = () => {
   const [newCategory, setNewCategory] = useState({ name: '', type: 'expense' as 'income' | 'expense' | 'installment' });
   const [newPaymentMethod, setNewPaymentMethod] = useState('');
 
+  // Akun Keuangan Form
+  const [newAccount, setNewAccount] = useState({
+    name: '',
+    type: 'Bank' as AccountType,
+    owner: 'Bersama' as 'Suami' | 'Istri' | 'Bersama',
+    current_balance: '',
+    credit_limit: ''
+  });
+
+  // Import Preview State
+  const [importPreview, setImportPreview] = useState<any | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (appSettings?.id) {
@@ -39,7 +77,7 @@ const Pengaturan = () => {
         husbandName: profile.husbandName,
         wifeName: profile.wifeName
       });
-      alert('Profil berhasil disimpan!');
+      alert('Profil keluarga berhasil disimpan!');
     }
   };
 
@@ -55,6 +93,7 @@ const Pengaturan = () => {
     }
   };
 
+  // Kategori Handlers
   const handleToggleCategory = async (cat: Category) => {
     if (cat.id) {
       await updateCategory(cat.id, { isActive: cat.isActive === 1 ? 0 : 1 });
@@ -79,38 +118,17 @@ const Pengaturan = () => {
     const newName = window.prompt('Ubah nama kategori:', cat.name);
     if (newName && newName.trim() !== '' && newName !== cat.name && cat.id) {
       await updateCategory(cat.id, { name: newName.trim() });
-      alert('Kategori diubah. Catatan lama tetap menggunakan nama lama.');
     }
   };
 
   const handleDeleteCategory = async (cat: Category) => {
-    if (window.confirm(`Hapus kategori "${cat.name}"? Peringatan: Disarankan 'Nonaktifkan' saja agar data lama tidak hilang kategorinya.`)) {
+    if (window.confirm(`Hapus kategori "${cat.name}"? Disarankan cukup non-aktifkan agar riwayat lama tetap jelas.`)) {
       if (cat.id) await deleteCategory(cat.id);
     }
   };
 
-  const handleMoveCategory = async (cat: Category, direction: 'up' | 'down') => {
-    const filteredCategories = categories.filter(c => c.type === cat.type);
-    const index = filteredCategories.findIndex(c => c.id === cat.id);
-    if ((direction === 'up' && index <= 0) || (direction === 'down' && index >= filteredCategories.length - 1)) return;
-    
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    const current = filteredCategories[index];
-    const target = filteredCategories[targetIndex];
-    
-    if (current.id && target.id) {
-      let currentOrder = current.order ?? categories.findIndex(c => c.id === current.id);
-      let targetOrder = target.order ?? categories.findIndex(c => c.id === target.id);
-      
-      if (currentOrder === targetOrder) {
-        targetOrder = direction === 'up' ? currentOrder + 1 : currentOrder - 1;
-      }
 
-      await updateCategory(current.id, { order: targetOrder });
-      await updateCategory(target.id, { order: currentOrder });
-    }
-  };
-
+  // Payment Method Handlers
   const handleTogglePaymentMethod = async (pm: PaymentMethod) => {
     if (pm.id) {
       await updatePaymentMethod(pm.id, { isActive: pm.isActive === 1 ? 0 : 1 });
@@ -130,54 +148,68 @@ const Pengaturan = () => {
     }
   };
 
-  const handleEditPaymentMethod = async (pm: PaymentMethod) => {
-    const newName = window.prompt('Ubah metode pembayaran:', pm.name);
-    if (newName && newName.trim() !== '' && newName !== pm.name && pm.id) {
-      await updatePaymentMethod(pm.id, { name: newName.trim() });
-      alert('Metode diubah. Catatan lama tetap menggunakan metode lama.');
-    }
-  };
-
   const handleDeletePaymentMethod = async (pm: PaymentMethod) => {
     if (window.confirm(`Hapus metode pembayaran "${pm.name}"?`)) {
       if (pm.id) await deletePaymentMethod(pm.id);
     }
   };
 
-  const handleMovePaymentMethod = async (index: number, direction: 'up' | 'down') => {
-    if ((direction === 'up' && index === 0) || (direction === 'down' && index === paymentMethods.length - 1)) return;
-    
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    const current = paymentMethods[index];
-    const target = paymentMethods[targetIndex];
-    
-    if (current.id && target.id) {
-      let currentOrder = current.order ?? index;
-      let targetOrder = target.order ?? targetIndex;
-      if (currentOrder === targetOrder) targetOrder = direction === 'up' ? currentOrder + 1 : currentOrder - 1;
-      
-      await updatePaymentMethod(current.id, { order: targetOrder });
-      await updatePaymentMethod(target.id, { order: currentOrder });
+  // Akun Keuangan Handlers
+  const handleAddAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAccount.name.trim()) return;
+
+    await addFinancialAccount({
+      name: newAccount.name.trim(),
+      type: newAccount.type,
+      owner: newAccount.owner,
+      currency: 'IDR',
+      opening_balance: Number(newAccount.current_balance) || 0,
+      current_balance: Number(newAccount.current_balance) || 0,
+      credit_limit: newAccount.credit_limit ? Number(newAccount.credit_limit) : undefined,
+      isActive: 1,
+      timestamp: Date.now()
+    });
+
+    setNewAccount({
+      name: '',
+      type: 'Bank',
+      owner: 'Bersama',
+      current_balance: '',
+      credit_limit: ''
+    });
+  };
+
+  const handleEditAccountBalance = async (acc: FinancialAccount) => {
+    const input = window.prompt(`Update saldo saat ini untuk "${acc.name}" (Rp):`, acc.current_balance.toString());
+    if (input !== null && !isNaN(Number(input))) {
+      await updateFinancialAccount(acc.id, { current_balance: Number(input) });
     }
   };
 
+  // Backup & Restore
   const handleExport = async () => {
     try {
       const data = {
+        version: "2.0.0",
+        app: "Cashflow",
+        exportDate: new Date().toISOString(),
         incomes,
         expenses,
         installments,
         categories,
         paymentMethods,
         appSettings,
-        exportDate: new Date().toISOString()
+        financialAccounts,
+        debtStatements,
+        transfers
       };
       
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Cashflow_Backup_${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `Cashflow_Backup_v2_${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -186,7 +218,7 @@ const Pengaturan = () => {
     }
   };
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -196,57 +228,113 @@ const Pengaturan = () => {
         const jsonStr = event.target?.result as string;
         const data = JSON.parse(jsonStr);
 
-        if (!data.incomes || !data.expenses) {
-          alert('Format file backup tidak valid atau rusak!');
+        if (!data.incomes && !data.expenses && !data.installments) {
+          alert('Format file backup tidak valid atau tidak memiliki data yang dikenali.');
           return;
         }
 
-        if (window.confirm('PERINGATAN: Mengimpor data akan memakan waktu untuk mengunggahnya ke Firebase. Lanjutkan?')) {
-          // Loop over and push to Firebase (we exclude 'id' to create new docs)
-          if (data.incomes?.length) {
-            for (const item of data.incomes) {
-              const { id, ...rest } = item;
-              await addIncome(rest);
-            }
-          }
-          if (data.expenses?.length) {
-            for (const item of data.expenses) {
-              const { id, ...rest } = item;
-              await addExpense(rest);
-            }
-          }
-          if (data.installments?.length) {
-            for (const item of data.installments) {
-              const { id, ...rest } = item;
-              await addInstallment(rest);
-            }
-          }
-          
-          alert('Import data ke Cloud Firebase berhasil!');
-        }
+        setImportPreview(data);
       } catch (err) {
         console.error(err);
-        alert('Terjadi kesalahan saat membaca atau memproses file backup.');
-      }
-      
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+        alert('File JSON tidak valid atau rusak.');
       }
     };
     reader.readAsText(file);
   };
 
-  const handleReset = async () => {
-    if (window.confirm('PERINGATAN KRITIKAL: Semua data di CLOUD akan dihapus. Lanjutkan?')) {
-      if (window.confirm('Apakah Anda BENAR-BENAR yakin? Data yang hilang tidak dapat dikembalikan tanpa file backup.')) {
-        
-        // Delete all data one by one (Firestore requirement)
-        for (const item of incomes) if (item.id) await deleteIncome(item.id);
-        for (const item of expenses) if (item.id) await deleteExpense(item.id);
-        for (const item of installments) if (item.id) await deleteInstallment(item.id);
-        
-        alert('Database telah dikosongkan.');
+  const handleConfirmImport = async () => {
+    if (!importPreview || isImporting) return;
+    setIsImporting(true);
+
+    try {
+      const plan = prepareBackupImport(importPreview, {
+        incomes,
+        expenses,
+        installments,
+        financialAccounts
+      });
+
+      const accountIdMap = new Map<string, string>(plan.existingAccountMap);
+      const installmentIdMap = new Map<string, string>(plan.existingInstallmentMap);
+
+      let importedCount = 0;
+
+      // 1. Import New Accounts
+      for (const acc of plan.accounts) {
+        const newId = await addFinancialAccount(acc.item);
+        if (acc.originalId) {
+          accountIdMap.set(acc.originalId, newId);
+        }
+        importedCount++;
       }
+
+      // 2. Import New Installments
+      const knownExistingAccountIds = new Set(
+        financialAccounts.map(a => a.id).filter((id): id is string => Boolean(id))
+      );
+
+      for (const inst of plan.installments) {
+        const mappedInst = { ...inst.item };
+        if (mappedInst.linked_account_id) {
+          mappedInst.linked_account_id = resolveForeignKey(
+            mappedInst.linked_account_id,
+            accountIdMap,
+            knownExistingAccountIds
+          );
+        }
+        const newId = await addInstallment(mappedInst);
+        if (inst.originalId) {
+          installmentIdMap.set(inst.originalId, newId);
+        }
+        importedCount++;
+      }
+
+      // 3. Import Incomes
+      for (const inc of plan.incomes) {
+        await addIncome(inc.item);
+        importedCount++;
+      }
+
+      // 4. Import Expenses (with remapped relations)
+      const knownInstallmentIds = new Set(
+        installments.map(i => i.id).filter((id): id is string => Boolean(id))
+      );
+      const knownAccountIds = new Set(
+        financialAccounts.map(a => a.id).filter((id): id is string => Boolean(id))
+      );
+
+      for (const exp of plan.expenses) {
+        const mappedExp = { ...exp.item };
+        if (mappedExp.installment_id) {
+          mappedExp.installment_id = resolveForeignKey(
+            mappedExp.installment_id,
+            installmentIdMap,
+            knownInstallmentIds
+          );
+        }
+        if (mappedExp.source_account_id) {
+          mappedExp.source_account_id = resolveForeignKey(
+            mappedExp.source_account_id,
+            accountIdMap,
+            knownAccountIds
+          );
+        }
+        await addExpense(mappedExp);
+        importedCount++;
+      }
+
+      let msg = `Sukses! ${importedCount} data berhasil diimpor dan disinkronkan ke Firebase.`;
+      if (plan.duplicatesCount > 0) {
+        msg += ` (${plan.duplicatesCount} data duplikat diabaikan demi menjaga integritas saldo).`;
+      }
+      alert(msg);
+      setImportPreview(null);
+    } catch (err: any) {
+      console.error(err);
+      alert(`Gagal saat proses impor: ${err.message || 'Error tidak diketahui'}`);
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -254,244 +342,317 @@ const Pengaturan = () => {
 
   return (
     <div>
-      <div className="mb-4">
-        <h1 className="page-title" style={{ marginBottom: '0' }}>Pengaturan</h1>
-        <p className="text-secondary">Kelola profil, referensi, dan preferensi aplikasi</p>
+      <div className="mb-6">
+        <h1 className="page-title" style={{ marginBottom: '0' }}>Pengaturan Sistem</h1>
+        <p className="text-secondary">Kelola akun keuangan, kategori transaksi, profil, serta backup dan restore data</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        {/* Kolom Kiri */}
-        <div>
-          {/* AKUN */}
-          <div className="card mb-4">
-            <h3 className="mb-4">🔒 Akun</h3>
-            <div className="flex justify-between align-center">
-              <div>
-                <div style={{fontWeight: 600}}>Login dengan Google</div>
-                <div className="text-secondary" style={{fontSize: '0.85rem'}}>{user?.email}</div>
-              </div>
-              <button onClick={() => signOut(auth)} className="btn btn-danger">Logout</button>
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        {/* Form Profil Keluarga */}
+        <div className="card">
+          <h3 className="mb-4">Profil Keluarga</h3>
+          <form onSubmit={handleSaveProfile}>
+            <div className="form-group mb-3">
+              <label className="form-label">Nama Keluarga / Brankas</label>
+              <input
+                type="text"
+                className="form-control"
+                value={profile.familyName}
+                onChange={(e) => setProfile({ ...profile, familyName: e.target.value })}
+                required
+              />
             </div>
-          </div>
-
-          {/* PROFIL */}
-          <div className="card mb-4">
-            <h3 className="mb-4">👨‍👩‍👧 Profil Keluarga</h3>
-            <form onSubmit={handleSaveProfile}>
+            <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="form-group">
-                <label className="form-label">Nama Keluarga</label>
-                <input 
-                  type="text" className="form-control" 
-                  value={profile.familyName} onChange={e => setProfile({...profile, familyName: e.target.value})}
+                <label className="form-label">Nama Suami</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={profile.husbandName}
+                  onChange={(e) => setProfile({ ...profile, husbandName: e.target.value })}
                   required
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="form-group">
-                  <label className="form-label">Nama Suami</label>
-                  <input 
-                    type="text" className="form-control" 
-                    value={profile.husbandName} onChange={e => setProfile({...profile, husbandName: e.target.value})}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Nama Istri</label>
-                  <input 
-                    type="text" className="form-control" 
-                    value={profile.wifeName} onChange={e => setProfile({...profile, wifeName: e.target.value})}
-                    required
-                  />
-                </div>
+              <div className="form-group">
+                <label className="form-label">Nama Istri</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={profile.wifeName}
+                  onChange={(e) => setProfile({ ...profile, wifeName: e.target.value })}
+                  required
+                />
               </div>
-              <button type="submit" className="btn btn-primary">Simpan Profil</button>
-            </form>
-          </div>
-
-          {/* PREFERENSI */}
-          <div className="card mb-4">
-            <h3 className="mb-4">🎨 Preferensi Aplikasi</h3>
-            <form onSubmit={handleSavePreferences}>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="form-group">
-                  <label className="form-label">Tema</label>
-                  <select 
-                    className="form-control" 
-                    value={preferences.theme} onChange={e => setPreferences({...preferences, theme: e.target.value as 'light'|'dark'|'system'})}
-                  >
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                    <option value="system">System Default</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Default Periode Dashboard</label>
-                  <select 
-                    className="form-control"
-                    value={preferences.defaultDashboardPeriod} onChange={e => setPreferences({...preferences, defaultDashboardPeriod: e.target.value})}
-                  >
-                    <option value="Bulan Ini">Bulan Ini</option>
-                    <option value="3 Bulan Terakhir">3 Bulan Terakhir</option>
-                  </select>
-                </div>
-              </div>
-              <button type="submit" className="btn btn-primary">Simpan Preferensi</button>
-            </form>
-          </div>
-
-          {/* DATA & BACKUP */}
-          <div className="card">
-            <h3 className="mb-4">💾 Data & Backup (Firebase Cloud)</h3>
-            <div className="flex gap-2 mb-4">
-              <button className="btn btn-outline" onClick={handleExport}>
-                <MdDownload /> Export JSON
-              </button>
-              <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>
-                <MdUpload /> Import JSON ke Cloud
-              </button>
-              <input 
-                type="file" 
-                accept=".json"
-                ref={fileInputRef}
-                style={{ display: 'none' }}
-                onChange={handleImport}
-              />
             </div>
-            <div style={{ padding: '1rem', background: 'var(--danger-color)', color: 'white', borderRadius: 'var(--radius-md)' }}>
-              <h4 className="flex align-center gap-2 mb-2"><MdWarning /> Hapus Semua Data Cloud</h4>
-              <p style={{ fontSize: '0.875rem', marginBottom: '1rem' }}>Menghapus seluruh transaksi dari Firebase.</p>
-              <button className="btn" style={{ background: 'white', color: 'var(--danger-color)' }} onClick={handleReset}>
-                Hapus Semua Data
-              </button>
-            </div>
-          </div>
+            <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Simpan Profil</button>
+          </form>
         </div>
 
-        {/* Kolom Kanan */}
-        <div>
-          {/* DATA REFERENSI KATEGORI */}
-          <div className="card mb-4">
-            <h3 className="mb-4">🛒 Kategori Transaksi</h3>
-            
-            <form onSubmit={handleAddCategory} className="flex gap-2 mb-4">
-              <input 
-                type="text" className="form-control" placeholder="Nama kategori baru" 
-                value={newCategory.name} onChange={e => setNewCategory({...newCategory, name: e.target.value})} required
-              />
-              <select className="form-control" style={{ width: 'auto' }} value={newCategory.type} onChange={e => setNewCategory({...newCategory, type: e.target.value as any})}>
-                <option value="expense">Pengeluaran</option>
-                <option value="income">Pemasukan</option>
-                <option value="installment">Cicilan</option>
+        {/* Preferensi Tampilan */}
+        <div className="card">
+          <h3 className="mb-4">Preferensi Tampilan</h3>
+          <form onSubmit={handleSavePreferences}>
+            <div className="form-group mb-4">
+              <label className="form-label">Tema Aplikasi</label>
+              <select
+                className="form-control"
+                value={preferences.theme}
+                onChange={(e) => setPreferences({ ...preferences, theme: e.target.value as 'light' | 'dark' | 'system' })}
+              >
+                <option value="light">Light Mode</option>
+                <option value="dark">Dark Mode</option>
+                <option value="system">Sesuai Sistem Operasi</option>
               </select>
-              <button type="submit" className="btn btn-primary"><MdAdd /></button>
-            </form>
-
-            <div style={{ maxHeight: '300px', overflowY: 'auto', borderRadius: 'var(--radius-md)' }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Nama</th>
-                    <th>Tipe</th>
-                    <th style={{ textAlign: 'center' }}>Status</th>
-                    <th style={{ textAlign: 'center' }}>Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCategories.map((cat, index) => (
-                    <tr key={cat.id} style={{ opacity: cat.isActive === 1 ? 1 : 0.5 }}>
-                      <td>{cat.name}</td>
-                      <td>
-                        {cat.type === 'expense' ? 'Pengeluaran' : cat.type === 'income' ? 'Pemasukan' : 'Cicilan'}
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <button 
-                          onClick={() => handleToggleCategory(cat)}
-                          style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem', borderRadius: '1rem', border: 'none', cursor: 'pointer', background: cat.isActive === 1 ? 'var(--success-color)' : 'var(--text-secondary)', color: 'white', fontWeight: 600 }}
-                        >
-                          {cat.isActive === 1 ? 'Aktif' : 'Nonaktif'}
-                        </button>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <div className="flex gap-2 justify-center">
-                          <button onClick={() => handleMoveCategory(cat, 'up')} disabled={index === 0} style={{ background: 'none', border: 'none', color: index === 0 ? 'var(--border-color)' : 'var(--text-color)', cursor: index === 0 ? 'default' : 'pointer', fontSize: '1.2rem' }} title="Naik">
-                            <MdArrowUpward />
-                          </button>
-                          <button onClick={() => handleMoveCategory(cat, 'down')} disabled={index === filteredCategories.length - 1} style={{ background: 'none', border: 'none', color: index === filteredCategories.length - 1 ? 'var(--border-color)' : 'var(--text-color)', cursor: index === filteredCategories.length - 1 ? 'default' : 'pointer', fontSize: '1.2rem' }} title="Turun">
-                            <MdArrowDownward />
-                          </button>
-                          <button onClick={() => handleEditCategory(cat)} style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer', fontSize: '1.2rem' }} title="Edit">
-                            <MdEdit />
-                          </button>
-                          <button onClick={() => handleDeleteCategory(cat)} style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer', fontSize: '1.2rem' }} title="Hapus">
-                            <MdDelete />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
-          </div>
-
-          {/* DATA REFERENSI METODE PEMBAYARAN */}
-          <div className="card">
-            <h3 className="mb-4">💳 Metode Pembayaran</h3>
-            
-            <form onSubmit={handleAddPaymentMethod} className="flex gap-2 mb-4">
-              <input 
-                type="text" className="form-control" placeholder="Nama metode pembayaran baru" 
-                value={newPaymentMethod} onChange={e => setNewPaymentMethod(e.target.value)} required
-              />
-              <button type="submit" className="btn btn-primary"><MdAdd /></button>
-            </form>
-
-            <div style={{ maxHeight: '200px', overflowY: 'auto', borderRadius: 'var(--radius-md)' }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Nama</th>
-                    <th style={{ textAlign: 'center' }}>Status</th>
-                    <th style={{ textAlign: 'center' }}>Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paymentMethods.map((pm, index) => (
-                    <tr key={pm.id} style={{ opacity: pm.isActive === 1 ? 1 : 0.5 }}>
-                      <td>{pm.name}</td>
-                      <td style={{ textAlign: 'center' }}>
-                        <button 
-                          onClick={() => handleTogglePaymentMethod(pm)}
-                          style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem', borderRadius: '1rem', border: 'none', cursor: 'pointer', background: pm.isActive === 1 ? 'var(--success-color)' : 'var(--text-secondary)', color: 'white', fontWeight: 600 }}
-                        >
-                          {pm.isActive === 1 ? 'Aktif' : 'Nonaktif'}
-                        </button>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <div className="flex gap-2 justify-center">
-                          <button onClick={() => handleMovePaymentMethod(index, 'up')} disabled={index === 0} style={{ background: 'none', border: 'none', color: index === 0 ? 'var(--border-color)' : 'var(--text-color)', cursor: index === 0 ? 'default' : 'pointer', fontSize: '1.2rem' }} title="Naik">
-                            <MdArrowUpward />
-                          </button>
-                          <button onClick={() => handleMovePaymentMethod(index, 'down')} disabled={index === paymentMethods.length - 1} style={{ background: 'none', border: 'none', color: index === paymentMethods.length - 1 ? 'var(--border-color)' : 'var(--text-color)', cursor: index === paymentMethods.length - 1 ? 'default' : 'pointer', fontSize: '1.2rem' }} title="Turun">
-                            <MdArrowDownward />
-                          </button>
-                          <button onClick={() => handleEditPaymentMethod(pm)} style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer', fontSize: '1.2rem' }} title="Edit">
-                            <MdEdit />
-                          </button>
-                          <button onClick={() => handleDeletePaymentMethod(pm)} style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer', fontSize: '1.2rem' }} title="Hapus">
-                            <MdDelete />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
+            <button type="submit" className="btn btn-outline" style={{ width: '100%' }}>Simpan Preferensi</button>
+          </form>
         </div>
       </div>
+
+      {/* MANAJEMEN AKUN KEUANGAN (FINANCIAL ACCOUNTS) */}
+      <div className="card mb-6">
+        <div className="flex justify-between align-center mb-4">
+          <div>
+            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <MdAccountBalance className="text-primary" /> Akun Keuangan & Rekening
+            </h3>
+            <p className="text-secondary" style={{ fontSize: '0.85rem', margin: '0.2rem 0 0' }}>
+              Kelola dompet tunai, rekening bank, kartu kredit, dan e-wallet untuk melacak saldo likuid riil
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          {financialAccounts.map(acc => (
+            <div key={acc.id} className="card" style={{ padding: '1rem', borderLeft: `4px solid ${acc.type === 'Credit Card' ? 'var(--warning-color)' : 'var(--primary-color)'}` }}>
+              <div className="flex justify-between align-center mb-1">
+                <strong>{acc.name}</strong>
+                <span className="badge badge-outline">{acc.type}</span>
+              </div>
+              <div className="text-secondary" style={{ fontSize: '0.75rem' }}>Saldo Berjalan</div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', margin: '0.2rem 0' }}>
+                {formatCurrency(acc.current_balance)}
+              </div>
+              <div className="flex justify-between align-center mt-2 pt-2" style={{ borderTop: '1px solid var(--border-color)' }}>
+                <button
+                  className="btn btn-outline"
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                  onClick={() => handleEditAccountBalance(acc)}
+                >
+                  Sesuaikan Saldo
+                </button>
+                <button
+                  style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer' }}
+                  onClick={() => deleteFinancialAccount(acc.id)}
+                >
+                  <MdDelete />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Form Tambah Akun Baru */}
+        <form onSubmit={handleAddAccount} style={{ background: 'var(--bg-color)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
+          <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '0.75rem' }}>Tambah Akun Keuangan Baru</div>
+          <div className="grid grid-cols-4 gap-3">
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Nama Akun (e.g. BCA Tabungan)"
+              value={newAccount.name}
+              onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
+              required
+            />
+            <select
+              className="form-control"
+              value={newAccount.type}
+              onChange={(e) => setNewAccount({ ...newAccount, type: e.target.value as AccountType })}
+            >
+              <option value="Bank">Bank</option>
+              <option value="Cash">Cash / Dompet</option>
+              <option value="E-Wallet">E-Wallet</option>
+              <option value="Credit Card">Credit Card</option>
+              <option value="PayLater">PayLater</option>
+            </select>
+            <input
+              type="number"
+              className="form-control"
+              placeholder="Saldo Awal (Rp)"
+              value={newAccount.current_balance}
+              onChange={(e) => setNewAccount({ ...newAccount, current_balance: e.target.value })}
+              required
+            />
+            <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem' }}>
+              <MdAdd /> Tambah Akun
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* KATEGORI & METODE PEMBAYARAN */}
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        {/* Kategori */}
+        <div className="card">
+          <h3 className="mb-3">Kategori Transaksi</h3>
+          <div className="flex gap-2 mb-3">
+            <button
+              type="button"
+              className={`btn ${newCategory.type === 'expense' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+              onClick={() => setNewCategory({ ...newCategory, type: 'expense' })}
+            >
+              Pengeluaran
+            </button>
+            <button
+              type="button"
+              className={`btn ${newCategory.type === 'income' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+              onClick={() => setNewCategory({ ...newCategory, type: 'income' })}
+            >
+              Pemasukan
+            </button>
+            <button
+              type="button"
+              className={`btn ${newCategory.type === 'installment' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+              onClick={() => setNewCategory({ ...newCategory, type: 'installment' })}
+            >
+              Cicilan
+            </button>
+          </div>
+
+          <form onSubmit={handleAddCategory} className="flex gap-2 mb-3">
+            <input
+              type="text"
+              className="form-control"
+              placeholder={`Tambah kategori ${newCategory.type}...`}
+              value={newCategory.name}
+              onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+              required
+            />
+            <button type="submit" className="btn btn-primary"><MdAdd /></button>
+          </form>
+
+          <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+            {filteredCategories.map(cat => (
+              <div key={cat.id} className="flex justify-between align-center py-2" style={{ borderBottom: '1px solid var(--border-color)' }}>
+                <span style={{ opacity: cat.isActive === 1 ? 1 : 0.4 }}>{cat.name}</span>
+                <div className="flex gap-1 align-center">
+                  <button
+                    onClick={() => handleToggleCategory(cat)}
+                    className={`btn ${cat.isActive === 1 ? 'btn-outline' : 'btn-primary'}`}
+                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                  >
+                    {cat.isActive === 1 ? 'Nonaktifkan' : 'Aktifkan'}
+                  </button>
+                  <button onClick={() => handleEditCategory(cat)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><MdEdit /></button>
+                  <button onClick={() => handleDeleteCategory(cat)} style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer' }}><MdDelete /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Metode Pembayaran */}
+        <div className="card">
+          <h3 className="mb-3">Metode Pembayaran</h3>
+          <form onSubmit={handleAddPaymentMethod} className="flex gap-2 mb-3">
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Tambah metode bayar..."
+              value={newPaymentMethod}
+              onChange={(e) => setNewPaymentMethod(e.target.value)}
+              required
+            />
+            <button type="submit" className="btn btn-primary"><MdAdd /></button>
+          </form>
+
+          <div style={{ maxHeight: '290px', overflowY: 'auto' }}>
+            {paymentMethods.map(pm => (
+              <div key={pm.id} className="flex justify-between align-center py-2" style={{ borderBottom: '1px solid var(--border-color)' }}>
+                <span style={{ opacity: pm.isActive === 1 ? 1 : 0.4 }}>{pm.name}</span>
+                <div className="flex gap-1 align-center">
+                  <button
+                    onClick={() => handleTogglePaymentMethod(pm)}
+                    className={`btn ${pm.isActive === 1 ? 'btn-outline' : 'btn-primary'}`}
+                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                  >
+                    {pm.isActive === 1 ? 'Nonaktifkan' : 'Aktifkan'}
+                  </button>
+                  <button onClick={() => handleDeletePaymentMethod(pm)} style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer' }}><MdDelete /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* BACKUP & RESTORE JSON */}
+      <div className="card">
+        <h3 className="mb-3">Backup & Restore Cloud Data</h3>
+        <p className="text-secondary" style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+          Ekspor seluruh data keuangan Anda ke dalam format file JSON aman, atau pulihkan data dari file cadangan sebelumnya.
+        </p>
+
+        <div className="flex gap-4">
+          <button className="btn btn-primary" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <MdDownload /> Ekspor Backup JSON (v2.0)
+          </button>
+          <label className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <MdUpload /> Impor File Cadangan
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              accept=".json"
+              style={{ display: 'none' }}
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* MODAL PREVIEW RESTORE DATA (PROTEKSI DUPLIKAT & PRATINJAU) */}
+      {importPreview && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Pratinjau Pemulihan Data</h2>
+              <button className="close-btn" onClick={() => setImportPreview(null)} disabled={isImporting}>&times;</button>
+            </div>
+            <div className="p-2">
+              <p style={{ fontSize: '0.9rem' }}>
+                File cadangan terdeteksi valid. Rincian data yang akan diunggah ke Firebase:
+              </p>
+              <ul style={{ background: 'var(--bg-color)', padding: '1rem 1.5rem', borderRadius: 'var(--radius-md)', margin: '1rem 0' }}>
+                <li>Pemasukan: <strong>{importPreview.incomes?.length || 0}</strong> rekaman</li>
+                <li>Pengeluaran: <strong>{importPreview.expenses?.length || 0}</strong> rekaman</li>
+                <li>Cicilan Pinjaman: <strong>{importPreview.installments?.length || 0}</strong> rekaman</li>
+                <li>Akun Keuangan: <strong>{importPreview.financialAccounts?.length || 0}</strong> akun</li>
+              </ul>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+                <MdWarning className="text-warning" style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />
+                Data akan ditambahkan secara aman tanpa merusak struktur relasi cicilan.
+              </div>
+              <div className="flex justify-between">
+                <button type="button" className="btn btn-outline" onClick={() => setImportPreview(null)} disabled={isImporting}>
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleConfirmImport}
+                  disabled={isImporting}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                >
+                  <MdCheckCircle /> {isImporting ? 'Mengunggah...' : 'Konfirmasi Impor'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

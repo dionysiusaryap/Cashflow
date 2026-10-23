@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
 import { getFinancialPeriod, getLast6FinancialPeriods, formatPeriodToMonthYear } from '../utils/dateUtils';
-import { calculateFinancialSummary } from '../utils/financeCalculations';
+import { calculateFinancialSummary, calculateCashProjection } from '../utils/financeCalculations';
 import { Link } from 'react-router-dom';
 import { 
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   LineChart, Line, XAxis, YAxis, CartesianGrid
 } from 'recharts';
+import { MdWarning, MdSavings, MdTrendingUp } from 'react-icons/md';
 
 const COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#64748b', '#ef4444', '#14b8a6', '#84cc16', '#f97316'];
 
@@ -16,6 +17,8 @@ const Dashboard = () => {
     incomes,
     expenses, 
     installments,
+    financialAccounts,
+    debtStatements,
     categories,
     appSettings
   } = useAppStore();
@@ -26,7 +29,10 @@ const Dashboard = () => {
   
   const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
 
-  const summary = calculateFinancialSummary(incomes, expenses, installments, selectedMonth);
+  const summary = calculateFinancialSummary(incomes, expenses, installments, selectedMonth, {
+    accounts: financialAccounts,
+    statements: debtStatements
+  });
 
   const periodExpenses = expenses.filter(e => getFinancialPeriod(e.date) === selectedMonth || e.date === 'Semua Bulan');
   const validDailyExpenses = periodExpenses.filter(e => 
@@ -41,8 +47,8 @@ const Dashboard = () => {
     return acc;
   }, {} as Record<string, number>);
 
-  // Menambahkan tagihan cicilan aktif ke dalam kategori agar total Pie Chart sinkron dengan Total Expense
-  installments.filter(i => (Number(i.remaining_installments) || 0) > 0).forEach(i => {
+  // Menambahkan tagihan cicilan aktif ke dalam kategori agar total Pie Chart sinkron
+  installments.filter(i => (Number(i.remaining_installments) || 0) > 0 && i.status !== 'Lunas').forEach(i => {
     const categoryName = i.type || 'Cicilan Lainnya';
     expenseByCategory[categoryName] = (expenseByCategory[categoryName] || 0) + (Number(i.monthly_payment) || 0);
   });
@@ -54,24 +60,24 @@ const Dashboard = () => {
 
   const last6Months = getLast6FinancialPeriods(currentMonthStr);
   const trendData = last6Months.map(m => {
-    const s = calculateFinancialSummary(incomes, expenses, installments, m);
+    const s = calculateFinancialSummary(incomes, expenses, installments, m, {
+      accounts: financialAccounts,
+      statements: debtStatements
+    });
     return { 
       name: formatPeriodToMonthYear(m).split(' ')[0], 
-      Pengeluaran: s.totalActualExpense 
+      Pengeluaran: s.economicExpense || s.totalActualExpense 
     };
   });
 
-  // --- Kebutuhan Card Ringkasan Tagihan & Kewajiban Bulan Ini ---
-
+  // Kebutuhan Card Ringkasan Tagihan & Kewajiban Bulan Ini
   const installmentCategories = new Set(categories.filter(c => c.type === 'installment').map(c => c.name));
   const allGroups = new Set<string>();
   
-  // Ambil semua jenis cicilan yang aktif
-  installments.filter(i => (Number(i.remaining_installments) || 0) > 0).forEach(i => {
+  installments.filter(i => (Number(i.remaining_installments) || 0) > 0 && i.status !== 'Lunas').forEach(i => {
     if (i.type) allGroups.add(i.type);
   });
   
-  // Ambil semua metode pembayaran dari pengeluaran berjalan yang TERMASUK kategori cicilan/kredit
   validDailyExpenses.forEach(e => {
     const key = e.payment_method || '';
     if (installmentCategories.has(key)) {
@@ -83,10 +89,9 @@ const Dashboard = () => {
   
   allGroups.forEach(group => {
     const instSum = installments
-      .filter(i => (Number(i.remaining_installments) || 0) > 0 && i.type === group)
+      .filter(i => (Number(i.remaining_installments) || 0) > 0 && i.type === group && i.status !== 'Lunas')
       .reduce((sum, i) => sum + (Number(i.monthly_payment) || 0), 0);
       
-    // Hitung seluruh pengeluaran (baik bulan ini maupun rutin/Semua Bulan) yang pakai metode kredit ini
     const expSum = validDailyExpenses
       .filter(e => (e.payment_method || '') === group)
       .reduce((sum, e) => sum + e.amount, 0);
@@ -99,20 +104,48 @@ const Dashboard = () => {
 
   groupedBills.sort((a, b) => b.total - a.total);
 
-  // Pengeluaran Rutin (Semua Bulan) - HANYA yang tidak menggunakan metode kredit/cicilan
   const recurringExpenses = validDailyExpenses.filter(e => e.date === 'Semua Bulan' && !installmentCategories.has(e.payment_method || ''));
   const totalRecurring = recurringExpenses.reduce((sum, e) => sum + e.amount, 0);
 
+  // Proyeksi Kas 30 Hari
+  const liquidCash = financialAccounts
+    .filter(a => a.isActive === 1 && (a.type === 'Cash' || a.type === 'Bank' || a.type === 'E-Wallet'))
+    .reduce((sum, a) => sum + (Number(a.current_balance) || 0), 0);
+
+  const confirmedIncome = incomes
+    .filter(i => i.date !== 'Semua Bulan')
+    .reduce((sum, i) => sum + i.amount, 0);
+
+  const projection = calculateCashProjection(
+    liquidCash,
+    confirmedIncome,
+    0,
+    installments,
+    debtStatements,
+    expenses
+  );
+
   return (
     <div>
+      {/* Header Dashboard */}
       <div className="flex justify-between align-center mb-6 dashboard-header">
         <div>
-          <h1 className="page-title" style={{marginBottom: '0'}}>Good Morning, {appSettings?.husbandName || 'Alex'}! 👋</h1>
-          <p className="text-secondary">Here's what's happening with your finances today.</p>
+          <h1 className="page-title" style={{marginBottom: '0'}}>Selamat Datang, {appSettings?.husbandName || 'Keluarga'}! 👋</h1>
+          <p className="text-secondary">Ringkasan kondisi arus kas, beban konsumsi, dan kewajiban finansial Anda.</p>
         </div>
         <div className="flex gap-2 align-center">
            <select 
-             style={{background: 'var(--surface-color)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.5rem 1rem', fontSize: '0.875rem', fontWeight: 600, fontFamily: 'inherit', color: 'inherit', cursor: 'pointer'}}
+             style={{
+               background: 'var(--surface-color)', 
+               border: '1px solid var(--border-color)', 
+               borderRadius: 'var(--radius-md)', 
+               padding: '0.5rem 1rem', 
+               fontSize: '0.875rem', 
+               fontWeight: 600, 
+               fontFamily: 'inherit', 
+               color: 'inherit', 
+               cursor: 'pointer'
+             }}
              value={selectedMonth}
              onChange={(e) => setSelectedMonth(e.target.value)}
            >
@@ -125,50 +158,120 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 mb-6">
-        <div className="card">
-          <div className="flex align-center gap-2 mb-2">
-             <div style={{background: '#f3e8ff', color: '#8b5cf6', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>↓</div>
-             <div className="text-secondary" style={{fontSize: '0.875rem', fontWeight: 600}}>Total Expenses</div>
+      {/* Banner Peringatan Defisit Jika Ada */}
+      {projection.isDeficitProjected && (
+        <div className="card mb-6" style={{ background: 'rgba(239, 68, 68, 0.08)', borderLeft: '5px solid var(--danger-color)', padding: '1rem 1.25rem' }}>
+          <div className="flex align-center gap-3">
+            <MdWarning className="text-danger" style={{ fontSize: '1.5rem', flexShrink: 0 }} />
+            <div>
+              <strong className="text-danger">Peringatan Likuiditas: Potensi Defisit Kas Terdeteksi</strong>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Kewajiban angsuran dan tagihan 30 hari ke depan melebihi saldo kas likuid tersedia sebesar <strong>{formatCurrency(projection.deficitAmount)}</strong>.
+              </p>
+            </div>
           </div>
-          <div className="card-value mb-1">{formatCurrency(summary.totalActualExpense)}</div>
-          <div className="text-secondary" style={{fontSize: '0.75rem'}}><span className="text-danger">↗</span> All expenses this month</div>
         </div>
+      )}
 
+      {/* Baris 1: KPI Arus Kas & Beban Konsumsi */}
+      <div className="grid grid-cols-4 mb-4">
         <div className="card">
           <div className="flex align-center gap-2 mb-2">
-             <div style={{background: '#d1fae5', color: '#10b981', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>↑</div>
-             <div className="text-secondary" style={{fontSize: '0.875rem', fontWeight: 600}}>Total Income</div>
+             <div style={{background: '#d1fae5', color: '#10b981', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+               <MdTrendingUp />
+             </div>
+             <div className="text-secondary" style={{fontSize: '0.875rem', fontWeight: 600}}>Total Pemasukan</div>
           </div>
           <div className="card-value mb-1">{formatCurrency(summary.totalIncome)}</div>
-          <div className="text-secondary" style={{fontSize: '0.75rem'}}><span className="text-success">↗</span> Income this month</div>
-        </div>
-
-        <div className="card">
-          <div className="flex align-center gap-2 mb-2">
-             <div style={{background: '#fef3c7', color: '#f59e0b', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>💰</div>
-             <div className="text-secondary" style={{fontSize: '0.875rem', fontWeight: 600}}>Net Savings</div>
+          <div className="text-secondary" style={{fontSize: '0.75rem'}} title="Seluruh pemasukan aktual periode berjalan">
+            Penghasilan periode ini
           </div>
-          <div className="card-value mb-1">{formatCurrency(summary.cashFlow)}</div>
-          <div className="text-secondary" style={{fontSize: '0.75rem'}}><span className="text-success">↗</span> Remaining cash flow</div>
         </div>
 
         <div className="card">
           <div className="flex align-center gap-2 mb-2">
-             <div style={{background: '#e0e7ff', color: '#3b82f6', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>📈</div>
+             <div style={{background: '#fee2e2', color: '#ef4444', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+               ↓
+             </div>
+             <div className="text-secondary" style={{fontSize: '0.875rem', fontWeight: 600}}>Beban Konsumsi</div>
+          </div>
+          <div className="card-value mb-1 text-danger">{formatCurrency(summary.economicExpense || summary.dailyExpenseTotal)}</div>
+          <div className="text-secondary" style={{fontSize: '0.75rem'}} title="Belanja tunai + belanja kartu kredit (tanpa double-count cicilan)">
+            Konsumsi belanja riil
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="flex align-center gap-2 mb-2">
+             <div style={{background: '#fef3c7', color: '#f59e0b', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+               <MdSavings />
+             </div>
+             <div className="text-secondary" style={{fontSize: '0.875rem', fontWeight: 600}}>Net Cash Flow</div>
+          </div>
+          <div className={`card-value mb-1 ${summary.netCashflow >= 0 ? 'text-success' : 'text-danger'}`}>
+            {formatCurrency(summary.netCashflow)}
+          </div>
+          <div className="text-secondary" style={{fontSize: '0.75rem'}} title="Arus Kas Masuk - Arus Kas Keluar Riil">
+            Perubahan kas riil
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="flex align-center gap-2 mb-2">
+             <div style={{background: '#e0e7ff', color: '#3b82f6', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+               %
+             </div>
              <div className="text-secondary" style={{fontSize: '0.875rem', fontWeight: 600}}>Saving Rate</div>
           </div>
           <div className="card-value mb-1">{summary.savingRate.toFixed(1)}%</div>
-          <div style={{width: '100%', height: 6, background: '#e2e8f0', borderRadius: 3, marginTop: 8}}>
-            <div style={{width: `${Math.max(0, Math.min(summary.savingRate, 100))}%`, height: '100%', background: '#3b82f6', borderRadius: 3}}></div>
+          <div style={{width: '100%', height: 6, background: 'var(--border-color)', borderRadius: 3, marginTop: 8}}>
+            <div style={{width: `${Math.max(0, Math.min(summary.savingRate, 100))}%`, height: '100%', background: summary.savingRate >= 20 ? 'var(--success-color)' : 'var(--warning-color)', borderRadius: 3}}></div>
           </div>
         </div>
       </div>
 
+      {/* Baris 2: Saldo Kas, Sisa Utang, Tagihan Mendatang, & Proyeksi */}
+      <div className="grid grid-cols-4 mb-6">
+        <div className="card" style={{ padding: '1rem', borderLeft: '4px solid var(--success-color)' }}>
+          <div className="text-secondary" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Saldo Kas & Bank Likuid</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '0.25rem' }}>
+            {formatCurrency(summary.availableLiquidCash || liquidCash)}
+          </div>
+          <div className="text-secondary" style={{ fontSize: '0.7rem' }}>Aset tunai & rekening bank</div>
+        </div>
+
+        <div className="card" style={{ padding: '1rem', borderLeft: '4px solid var(--warning-color)' }}>
+          <div className="text-secondary" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Total Sisa Pokok Utang</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '0.25rem' }}>
+            {formatCurrency(summary.totalOutstandingDebt || summary.totalOutstanding)}
+          </div>
+          <div className="text-secondary" style={{ fontSize: '0.7rem' }}>Outstanding pinjaman & kredit</div>
+        </div>
+
+        <div className="card" style={{ padding: '1rem', borderLeft: '4px solid var(--primary-color)' }}>
+          <div className="text-secondary" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Jatuh Tempo (30 Hari)</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--primary-color)', marginTop: '0.25rem' }}>
+            {formatCurrency(projection.upcomingObligations30Days)}
+          </div>
+          <div className="text-secondary" style={{ fontSize: '0.7rem' }}>Kewajiban 30 hari ke depan</div>
+        </div>
+
+        <div className="card" style={{ padding: '1rem', borderLeft: `4px solid ${projection.isDeficitProjected ? 'var(--danger-color)' : 'var(--success-color)'}` }}>
+          <div className="text-secondary" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Proyeksi Kas Akhir</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: projection.isDeficitProjected ? 'var(--danger-color)' : 'var(--success-color)', marginTop: '0.25rem' }}>
+            {formatCurrency(projection.projectedEndingCash)}
+          </div>
+          <div className="text-secondary" style={{ fontSize: '0.7rem' }}>
+            {projection.isDeficitProjected ? 'Potensi defisit' : 'Saldo diproyeksikan aman'}
+          </div>
+        </div>
+      </div>
+
+      {/* Visualisasi Grafik */}
       <div className="grid grid-cols-2 mb-6">
         <div className="card">
            <div className="flex justify-between align-center mb-4">
-             <h3 style={{fontSize: '1rem', margin: 0}}>Expenses by Category</h3>
+             <h3 style={{fontSize: '1rem', margin: 0}}>Komposisi Pengeluaran per Kategori</h3>
            </div>
            <div className="flex align-center gap-4 chart-layout">
              <div style={{width: '50%', height: 200}}>
@@ -201,15 +304,15 @@ const Dashboard = () => {
 
         <div className="card">
            <div className="flex justify-between align-center mb-4">
-             <h3 style={{fontSize: '1rem', margin: 0}}>Expenses Trend</h3>
+             <h3 style={{fontSize: '1rem', margin: 0}}>Tren Beban Pengeluaran (6 Bulan)</h3>
            </div>
            <div style={{width: '100%', height: 200}}>
              {trendData.length > 0 ? (
                <ResponsiveContainer>
                  <LineChart data={trendData}>
-                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} tickFormatter={(val) => `${(val/1000).toFixed(0)}k`} width={40} />
+                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
+                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: 'var(--text-secondary)', fontSize: 12}} />
+                   <YAxis axisLine={false} tickLine={false} tick={{fill: 'var(--text-secondary)', fontSize: 12}} tickFormatter={(val) => `${(val/1000000).toFixed(1)}Jt`} width={45} />
                    <Tooltip formatter={(val: any) => formatCurrency(Number(val))} />
                    <Line type="monotone" dataKey="Pengeluaran" stroke="#8b5cf6" strokeWidth={3} dot={{r: 4, fill: '#8b5cf6', strokeWidth: 2, stroke: '#fff'}} activeDot={{r: 6}} />
                  </LineChart>
@@ -219,10 +322,11 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Ringkasan Tagihan & Kewajiban Bulan Ini */}
       <div className="card">
         <div className="flex justify-between align-center mb-4">
           <h3 style={{fontSize: '1rem', margin: 0}}>Ringkasan Tagihan & Kewajiban Bulan Ini</h3>
-          <Link to="/cicilan" style={{fontSize: '0.85rem', color: 'var(--primary-color)', textDecoration: 'none', fontWeight: 600}}>View All</Link>
+          <Link to="/cicilan" style={{fontSize: '0.85rem', color: 'var(--primary-color)', textDecoration: 'none', fontWeight: 600}}>Lihat Semua</Link>
         </div>
         
         <div className="grid grid-cols-1">

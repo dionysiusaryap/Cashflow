@@ -7,13 +7,13 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts';
+import { MdSecurity, MdLightbulbOutline } from 'react-icons/md';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b'];
 
 const Analisa = () => {
-  const { incomes, expenses, installments } = useAppStore();
+  const { incomes, expenses, installments, financialAccounts, debtStatements } = useAppStore();
   
-  // Available Months for filter
   const allDates = [...incomes.map(i => i.date), ...expenses.map(e => e.date)].filter(d => d !== 'Semua Bulan');
   const availableMonths = Array.from(new Set(allDates.map(d => getFinancialPeriod(d)))).sort().reverse();
   const currentMonth = availableMonths.length > 0 ? availableMonths[0] : getFinancialPeriod(new Date());
@@ -21,25 +21,39 @@ const Analisa = () => {
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
 
   // 1. Calculate Summary for Selected Month
-  const currentSummary = calculateFinancialSummary(incomes, expenses, installments, selectedMonth);
+  const currentSummary = calculateFinancialSummary(incomes, expenses, installments, selectedMonth, {
+    accounts: financialAccounts,
+    statements: debtStatements
+  });
 
   // 2. Calculate Summary for Previous Month (MoM)
-  const selectedDate = new Date(selectedMonth + '-01');
-  selectedDate.setMonth(selectedDate.getMonth() - 1);
-  const prevMonthStr = selectedDate.toISOString().slice(0, 7);
-  const prevSummary = calculateFinancialSummary(incomes, expenses, installments, prevMonthStr);
+  const [yearStr, monthStr] = (selectedMonth || '2026-10').split('-');
+  let prevYear = parseInt(yearStr, 10);
+  let prevMonth = parseInt(monthStr, 10) - 1;
+  if (prevMonth <= 0) {
+    prevMonth = 12;
+    prevYear -= 1;
+  }
+  const prevMonthStr = `${prevYear}-${prevMonth.toString().padStart(2, '0')}`;
+  const prevSummary = calculateFinancialSummary(incomes, expenses, installments, prevMonthStr, {
+    accounts: financialAccounts,
+    statements: debtStatements
+  });
 
-  // 3. Cash Flow Trend (Last 6 Months)
+  // 3. Trend Data (Last 6 Months)
   const trendData = [];
   const last6Months = getLast6FinancialPeriods(selectedMonth);
   for (const m of last6Months) {
-    const s = calculateFinancialSummary(incomes, expenses, installments, m);
+    const s = calculateFinancialSummary(incomes, expenses, installments, m, {
+      accounts: financialAccounts,
+      statements: debtStatements
+    });
     trendData.push({
-      name: formatPeriodToMonthYear(m).split(' ')[0], // Tampilkan nama bulannya saja
+      name: formatPeriodToMonthYear(m).split(' ')[0],
       Pemasukan: s.totalIncome,
-      Pengeluaran: s.dailyExpenseTotal,
-      Cicilan: s.installmentPaymentTotal,
-      Sisa: s.cashFlow
+      BebanKonsumsi: s.economicExpense || s.dailyExpenseTotal,
+      KasKeluar: s.cashOutflow,
+      ArusKasBersih: s.netCashflow
     });
   }
 
@@ -67,46 +81,50 @@ const Analisa = () => {
   };
 
   const incomeChange = calculateChange(currentSummary.totalIncome, prevSummary.totalIncome);
-  const expenseChange = calculateChange(currentSummary.dailyExpenseTotal, prevSummary.dailyExpenseTotal);
+  const expenseChange = calculateChange(currentSummary.economicExpense, prevSummary.economicExpense);
   const savingRateChange = currentSummary.savingRate - prevSummary.savingRate;
 
-  // 6. Insight Generator
+  // 6. Insight Generator Berdasarkan Data Valid
   const generateInsights = () => {
     const insights = [];
     if (savingRateChange > 0) {
-      insights.push({ icon: '🟢', text: `Saving rate meningkat ${savingRateChange.toFixed(1)} percentage points dari bulan lalu.` });
+      insights.push({ icon: '🟢', text: `Saving rate meningkat ${savingRateChange.toFixed(1)}% dibandingkan periode sebelumnya.` });
     } else if (savingRateChange < 0) {
-      insights.push({ icon: '🔴', text: `Saving rate menurun ${Math.abs(savingRateChange).toFixed(1)} percentage points dari bulan lalu.` });
+      insights.push({ icon: '🔴', text: `Saving rate menurun ${Math.abs(savingRateChange).toFixed(1)}% dibandingkan periode sebelumnya.` });
     }
 
     if (expenseChange.type === 'increase' && expenseChange.val > 10) {
-      insights.push({ icon: '🟡', text: `Pengeluaran harian meningkat cukup tajam (${expenseChange.text}) dibanding bulan lalu.` });
+      insights.push({ icon: '🟡', text: `Beban konsumsi belanja meningkat ${expenseChange.text} dibanding bulan lalu.` });
     }
 
     if (topCategories.length > 0) {
-      insights.push({ icon: '🔎', text: `${topCategories[0].name} menjadi kategori pengeluaran harian terbesar bulan ini.` });
+      insights.push({ icon: '🔎', text: `Kategori "${topCategories[0].name}" merupakan pos pengeluaran terbesar (${formatCurrency(topCategories[0].value)}).` });
     }
 
-    if (currentSummary.debtRatio > 35) {
-      insights.push({ icon: '⚠️', text: `Beban cicilan mengambil ${currentSummary.debtRatio.toFixed(1)}% dari pemasukan. Hati-hati dalam menambah utang baru.` });
+    if (currentSummary.installmentDebtRatio > 35) {
+      insights.push({ icon: '⚠️', text: `Rasio cicilan (${currentSummary.installmentDebtRatio.toFixed(1)}%) melebihi ambang batas ideal (30% dari pemasukan).` });
+    } else if (currentSummary.totalIncome > 0 && currentSummary.installmentDebtRatio <= 30) {
+      insights.push({ icon: '✅', text: `Rasio cicilan (${currentSummary.installmentDebtRatio.toFixed(1)}%) berada dalam batas aman finansial (< 30%).` });
     }
+
     return insights;
   };
 
   // 7. Recommendations Generator
   const generateRecommendations = () => {
     const recs = [];
-    if (currentSummary.dailyExpenseTotal > prevSummary.dailyExpenseTotal) {
-      recs.push(`Pengeluaran harian naik ${formatCurrency(currentSummary.dailyExpenseTotal - prevSummary.dailyExpenseTotal)}. Evaluasi apakah ada pembelanjaan impulsif yang bisa ditekan bulan depan.`);
+    if (currentSummary.netCashflow < 0) {
+      recs.push(`Arus kas bersih periode ini mengalami defisit sebesar ${formatCurrency(Math.abs(currentSummary.netCashflow))}. Evaluasi pengeluaran non-primer atau gunakan dana cadangan.`);
+    } else if (currentSummary.netCashflow > 0 && currentSummary.savingRate >= 20) {
+      recs.push(`Sisa arus kas sangat sehat (${formatCurrency(currentSummary.netCashflow)}). Prioritaskan untuk menambah dana darurat atau investasi berkala.`);
     }
-    if (currentSummary.cashFlow > 0 && currentSummary.savingRate >= 20) {
-      recs.push(`Sisa uang cukup sehat (${formatCurrency(currentSummary.cashFlow)}). Alokasikan ke tabungan darurat atau investasi sebelum terpakai.`);
+
+    if (currentSummary.installmentDebtRatio > 35) {
+      recs.push(`Hindari mengambil fasilitas cicilan atau pinjaman baru sebelum angsuran yang ada terselesaikan.`);
     }
-    if (currentSummary.debtRatio > 40) {
-      recs.push(`Fokuslah melunasi cicilan dengan bunga terbesar atau saldo terkecil terlebih dahulu, hindari penggunaan paylater/kartu kredit tambahan.`);
-    }
+
     if (recs.length === 0) {
-      recs.push("Pertahankan kondisi finansial Anda yang sudah stabil saat ini.");
+      recs.push("Kondisi finansial Anda stabil dan terkendali. Pertahankan pola pencatatan disiplin ini.");
     }
     return recs;
   };
@@ -116,14 +134,14 @@ const Analisa = () => {
 
   return (
     <div>
-      <div className="flex justify-between align-center mb-4">
+      <div className="flex justify-between align-center mb-6">
         <div>
-          <h1 className="page-title" style={{ marginBottom: '0' }}>Analisa Keuangan</h1>
-          <p className="text-secondary">Laporan & Evaluasi Bulanan</p>
+          <h1 className="page-title" style={{ marginBottom: '0' }}>Analisa Finansial</h1>
+          <p className="text-secondary">Evaluasi kinerja anggaran, komparasi Month-over-Month, dan rasio utang</p>
         </div>
         <select 
           className="form-control" 
-          style={{ width: 'auto', minWidth: '150px' }}
+          style={{ width: 'auto', minWidth: '160px' }}
           value={selectedMonth}
           onChange={(e) => setSelectedMonth(e.target.value)}
         >
@@ -135,174 +153,127 @@ const Analisa = () => {
         </select>
       </div>
 
-      {/* Bagian 1: Financial Summary */}
-      <h3 className="mb-4">1. Ringkasan Keuangan ({formatPeriodToMonthYear(selectedMonth)})</h3>
-      <div className="grid grid-cols-5 gap-2 mb-4">
+      {/* Bagian 1: Ringkasan Metrik Finansial */}
+      <h3 className="mb-3">1. Ringkasan Kinerja ({formatPeriodToMonthYear(selectedMonth)})</h3>
+      <div className="grid grid-cols-5 gap-3 mb-6">
         <div className="card" style={{ padding: '1rem' }}>
           <div className="card-title">Pemasukan</div>
-          <div className="card-value" style={{ fontSize: '1.25rem' }}>{formatCurrency(currentSummary.totalIncome)}</div>
+          <div className="card-value" style={{ fontSize: '1.2rem' }}>{formatCurrency(currentSummary.totalIncome)}</div>
+          <span style={{ fontSize: '0.75rem', color: incomeChange.type === 'increase' ? 'var(--success-color)' : 'var(--danger-color)' }}>
+            MoM: {incomeChange.text}
+          </span>
         </div>
         <div className="card" style={{ padding: '1rem' }}>
-          <div className="card-title">Pengeluaran Harian</div>
-          <div className="card-value" style={{ fontSize: '1.25rem' }}>{formatCurrency(currentSummary.dailyExpenseTotal)}</div>
+          <div className="card-title">Beban Konsumsi</div>
+          <div className="card-value text-danger" style={{ fontSize: '1.2rem' }}>{formatCurrency(currentSummary.economicExpense)}</div>
+          <span style={{ fontSize: '0.75rem', color: expenseChange.type === 'increase' ? 'var(--danger-color)' : 'var(--success-color)' }}>
+            MoM: {expenseChange.text}
+          </span>
         </div>
         <div className="card" style={{ padding: '1rem' }}>
-          <div className="card-title">Cicilan Dibayar</div>
-          <div className="card-value" style={{ fontSize: '1.25rem' }}>{formatCurrency(currentSummary.installmentPaymentTotal)}</div>
+          <div className="card-title">Angsuran Utang</div>
+          <div className="card-value text-warning" style={{ fontSize: '1.2rem' }}>{formatCurrency(currentSummary.loanInstallmentObligation)}</div>
+          <span style={{ fontSize: '0.75rem' }} className="text-secondary">
+            Rasio: {currentSummary.installmentDebtRatio.toFixed(1)}%
+          </span>
         </div>
-        <div className="card" style={{ padding: '1rem', borderTop: `4px solid ${currentSummary.cashFlow >= 0 ? 'var(--success-color)' : 'var(--danger-color)'}` }}>
-          <div className="card-title">Sisa Cash Flow</div>
-          <div className="card-value" style={{ fontSize: '1.25rem' }}>{formatCurrency(currentSummary.cashFlow)}</div>
+        <div className="card" style={{ padding: '1rem', borderTop: `4px solid ${currentSummary.netCashflow >= 0 ? 'var(--success-color)' : 'var(--danger-color)'}` }}>
+          <div className="card-title">Net Cash Flow</div>
+          <div className="card-value" style={{ fontSize: '1.2rem', color: currentSummary.netCashflow >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
+            {formatCurrency(currentSummary.netCashflow)}
+          </div>
+          <span style={{ fontSize: '0.75rem' }} className="text-secondary">Arus kas riil</span>
         </div>
         <div className="card" style={{ padding: '1rem', borderTop: `4px solid ${currentSummary.savingRate >= 20 ? 'var(--success-color)' : 'var(--warning-color)'}` }}>
           <div className="card-title">Saving Rate</div>
-          <div className="card-value" style={{ fontSize: '1.25rem' }}>{currentSummary.savingRate.toFixed(1)}%</div>
+          <div className="card-value" style={{ fontSize: '1.2rem' }}>{currentSummary.savingRate.toFixed(1)}%</div>
+          <span style={{ fontSize: '0.75rem' }} className="text-secondary">Surplus / Income</span>
         </div>
       </div>
 
-      {/* Bagian 2: Trend & Bagian 5: MoM */}
-      <div className="grid grid-cols-2 mb-4">
+      {/* Bagian 2: Grafik Tren Arus Kas */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="card">
-          <h3 className="mb-4">2. Tren Arus Kas (6 Bulan)</h3>
+          <h3 className="mb-4" style={{ fontSize: '1rem' }}>2. Tren Pemasukan vs Pengeluaran (6 Bulan)</h3>
           {trendData.length > 0 ? (
-            <div style={{ width: '100%', height: 250 }}>
+            <div style={{ width: '100%', height: 260 }}>
               <ResponsiveContainer>
                 <BarChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" />
-                  <YAxis tickFormatter={(val) => `Rp${(val/1000000).toFixed(0)}Jt`} />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
+                  <XAxis dataKey="name" tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} />
+                  <YAxis tickFormatter={(val) => `Rp${(val/1000000).toFixed(0)}Jt`} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} width={50} />
                   <Tooltip formatter={(val: any) => formatCurrency(Number(val))} />
                   <Legend />
                   <Bar dataKey="Pemasukan" fill="var(--success-color)" />
-                  <Bar dataKey="Pengeluaran" fill="var(--danger-color)" stackId="out" />
-                  <Bar dataKey="Cicilan" fill="var(--warning-color)" stackId="out" />
+                  <Bar dataKey="BebanKonsumsi" fill="var(--danger-color)" name="Beban Konsumsi" />
+                  <Bar dataKey="KasKeluar" fill="var(--warning-color)" name="Kas Keluar Riil" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          ) : (
-             <p className="text-secondary text-center">Data tidak cukup</p>
-          )}
+          ) : <p className="text-secondary text-center py-6">Belum ada data tren.</p>}
         </div>
 
         <div className="card">
-           <h3 className="mb-4">5. Perbandingan (Bulan vs Bulan Lalu)</h3>
-           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-             <tbody>
-               <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                 <td style={{ padding: '0.75rem' }}>Pemasukan</td>
-                 <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>{formatCurrency(currentSummary.totalIncome)}</td>
-                 <td style={{ padding: '0.75rem', textAlign: 'right', color: incomeChange.type === 'decrease' ? 'var(--danger-color)' : 'var(--success-color)' }}>
-                   {incomeChange.text}
-                 </td>
-               </tr>
-               <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                 <td style={{ padding: '0.75rem' }}>Pengeluaran Harian</td>
-                 <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>{formatCurrency(currentSummary.dailyExpenseTotal)}</td>
-                 <td style={{ padding: '0.75rem', textAlign: 'right', color: expenseChange.type === 'increase' ? 'var(--warning-color)' : 'var(--success-color)' }}>
-                   {expenseChange.text}
-                 </td>
-               </tr>
-               <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                 <td style={{ padding: '0.75rem' }}>Expense Ratio</td>
-                 <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>{currentSummary.expenseRatio.toFixed(1)}%</td>
-                 <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                   Bulan lalu: {prevSummary.expenseRatio.toFixed(1)}%
-                 </td>
-               </tr>
-               <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                 <td style={{ padding: '0.75rem' }}>Saving Rate</td>
-                 <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>{currentSummary.savingRate.toFixed(1)}%</td>
-                 <td style={{ padding: '0.75rem', textAlign: 'right', color: savingRateChange >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
-                   {savingRateChange >= 0 ? '↑' : '↓'} {Math.abs(savingRateChange).toFixed(1)} pp
-                 </td>
-               </tr>
-             </tbody>
-           </table>
-        </div>
-      </div>
-
-      {/* Bagian 3 & 4: Spending & Debt */}
-      <div className="grid grid-cols-2 mb-4">
-         <div className="card">
-            <h3 className="mb-4">3. Analisa Pengeluaran Harian</h3>
-            <div className="flex gap-4">
-              <div style={{ width: '50%', height: 200 }}>
-                {categoryData.length > 0 ? (
-                  <ResponsiveContainer>
-                    <PieChart>
-                      <Pie data={categoryData} cx="50%" cy="50%" innerRadius={40} outerRadius={80} dataKey="value">
-                        {categoryData.map((_, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(val: any) => formatCurrency(Number(val))} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : <p className="text-secondary text-center mt-4">Belum ada pengeluaran</p>}
+          <h3 className="mb-4" style={{ fontSize: '1rem' }}>3. Top 5 Kategori Belanja Terbesar</h3>
+          {categoryData.length > 0 ? (
+            <div className="flex align-center gap-4">
+              <div style={{ width: '50%', height: 220 }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie data={topCategories} cx="50%" cy="50%" innerRadius={45} outerRadius={75} dataKey="value" stroke="none">
+                      {topCategories.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(val: any) => formatCurrency(Number(val))} />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
               <div style={{ width: '50%' }}>
-                <h4 className="text-secondary mb-2" style={{ fontSize: '0.875rem' }}>Top 5 Kategori</h4>
                 {topCategories.map((c, i) => (
-                  <div key={i} className="flex justify-between mb-2" style={{ fontSize: '0.875rem' }}>
-                    <span>{c.name}</span>
-                    <strong className="text-danger">{formatCurrency(c.value)}</strong>
+                  <div key={i} className="flex justify-between align-center mb-2" style={{ fontSize: '0.85rem' }}>
+                    <div className="flex align-center gap-2">
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS[i % COLORS.length] }}></div>
+                      <span>{c.name}</span>
+                    </div>
+                    <strong>{formatCurrency(c.value)}</strong>
                   </div>
                 ))}
               </div>
             </div>
-         </div>
-
-         <div className="card">
-            <h3 className="mb-4">4. Analisa Cicilan & Utang</h3>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              <div style={{ padding: '0.5rem', background: 'var(--bg-color)', borderRadius: 'var(--radius-md)' }}>
-                <div className="text-secondary" style={{ fontSize: '0.75rem' }}>Total Cicilan Bulanan</div>
-                <div style={{ fontWeight: 600 }}>{formatCurrency(currentSummary.totalMonthlyInstallment)}</div>
-              </div>
-              <div style={{ padding: '0.5rem', background: 'var(--bg-color)', borderRadius: 'var(--radius-md)' }}>
-                <div className="text-secondary" style={{ fontSize: '0.75rem' }}>Debt-to-Income Ratio</div>
-                <div style={{ fontWeight: 600, color: currentSummary.debtRatio > 35 ? 'var(--danger-color)' : 'var(--success-color)' }}>
-                  {currentSummary.debtRatio.toFixed(1)}%
-                </div>
-              </div>
-            </div>
-            <div style={{ padding: '0.5rem', background: 'var(--bg-color)', borderRadius: 'var(--radius-md)' }}>
-              <div className="text-secondary" style={{ fontSize: '0.75rem' }}>Sisa Total Outstanding (Seluruh Utang)</div>
-              <div style={{ fontWeight: 600, fontSize: '1.25rem' }}>{formatCurrency(currentSummary.totalOutstanding)}</div>
-            </div>
-         </div>
+          ) : <p className="text-secondary text-center py-6">Belum ada data belanja.</p>}
+        </div>
       </div>
 
-      {/* Bagian 6 & 7: Insight & Recommendation */}
-      <div className="grid grid-cols-2">
-        <div className="card" style={{ borderLeft: '4px solid var(--primary-color)' }}>
-          <h3 className="mb-4">6. Insight Otomatis</h3>
-          {insights.length > 0 ? (
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              {insights.map((ins, i) => (
-                <li key={i} className="mb-3 flex gap-2">
-                  <span>{ins.icon}</span>
-                  <span style={{ fontSize: '0.9rem' }}>{ins.text}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-secondary">Belum cukup data untuk menghasilkan insight bulan ini.</p>
-          )}
+      {/* Bagian 3: Diagnosa & Rekomendasi Kesehatan Finansial */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="card">
+          <h3 className="mb-3" style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <MdSecurity className="text-primary" /> Diagnosa Finansial
+          </h3>
+          <ul style={{ paddingLeft: '1.25rem', margin: 0 }}>
+            {insights.map((item, idx) => (
+              <li key={idx} style={{ marginBottom: '0.6rem', fontSize: '0.9rem' }}>
+                <span style={{ marginRight: '0.4rem' }}>{item.icon}</span>
+                {item.text}
+              </li>
+            ))}
+          </ul>
         </div>
-        
-        <div className="card" style={{ background: 'var(--surface-color)' }}>
-          <h3 className="mb-4">7. Yang Perlu Diperhatikan (Rekomendasi)</h3>
-          <ul style={{ paddingLeft: '1.25rem' }}>
-            {recommendations.map((rec, i) => (
-              <li key={i} className="mb-2" style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+
+        <div className="card">
+          <h3 className="mb-3" style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <MdLightbulbOutline className="text-warning" /> Rekomendasi Aksi
+          </h3>
+          <ul style={{ paddingLeft: '1.25rem', margin: 0 }}>
+            {recommendations.map((rec, idx) => (
+              <li key={idx} style={{ marginBottom: '0.6rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
                 {rec}
               </li>
             ))}
           </ul>
         </div>
       </div>
-
     </div>
   );
 };

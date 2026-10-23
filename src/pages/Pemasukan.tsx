@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency } from '../utils/format';
-import { getFinancialPeriod, formatPeriodToMonthYear } from '../utils/dateUtils';
+import { getFinancialPeriod, formatPeriodToMonthYear, getCurrentTimestamp } from '../utils/dateUtils';
 import { MdAdd, MdDelete, MdEdit } from 'react-icons/md';
 
 const Pemasukan = () => {
@@ -74,7 +74,7 @@ const Pemasukan = () => {
       owner: formData.owner as 'Suami' | 'Istri' | 'Bersama',
       amount: Number(formData.amount),
       notes: formData.notes,
-      timestamp: Date.now()
+      timestamp: getCurrentTimestamp()
     };
 
     if (editingId) {

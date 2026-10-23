@@ -12,105 +12,82 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import type { User } from 'firebase/auth';
+import type {
+  Income,
+  Expense,
+  Installment,
+  Category,
+  PaymentMethod,
+  AppSettings,
+  FinancialAccount,
+  DebtStatement,
+  Transfer,
+  AuditLog
+} from '../types/finance';
+import { financialService } from '../services/financialService';
 
-// Interfaces
-export interface Income {
-  id?: string;
-  date: string;
-  source: string;
-  owner: 'Suami' | 'Istri' | 'Bersama';
-  amount: number;
-  notes?: string;
-  timestamp: number;
-}
-
-export interface Expense {
-  id?: string;
-  date: string;
-  category: string;
-  payment_method: string;
-  amount: number;
-  description?: string;
-  owner: 'Suami' | 'Istri' | 'Bersama';
-  installment_id?: string;
-  timestamp: number;
-}
-
-export interface Installment {
-  id?: string;
-  name: string;
-  type: string;
-  initial_amount: number;
-  monthly_payment: number;
-  tenor: number;
-  paid_installments: number;
-  remaining_installments: number;
-  outstanding: number;
-  due_date: string;
-  payment_method: string;
-  status: 'Aman' | 'Segera jatuh tempo' | 'Jatuh tempo hari ini' | 'Terlambat' | 'Lunas';
-  notes?: string;
-  timestamp: number;
-}
-
-export interface Category {
-  id?: string;
-  name: string;
-  type: 'income' | 'expense' | 'installment';
-  isActive: number;
-  order?: number;
-}
-
-export interface PaymentMethod {
-  id?: string;
-  name: string;
-  isActive: number;
-  order?: number;
-}
-
-export interface AppSettings {
-  id?: string;
-  familyName: string;
-  husbandName: string;
-  wifeName: string;
-  currency: string;
-  dateFormat: string;
-  theme: 'light' | 'dark' | 'system';
-  defaultDashboardPeriod: string;
-}
+// Re-export types untuk backward-compatibility dengan komponen yang sudah ada
+export type {
+  Income,
+  Expense,
+  Installment,
+  Category,
+  PaymentMethod,
+  AppSettings,
+  FinancialAccount,
+  DebtStatement,
+  Transfer,
+  AuditLog
+};
 
 interface AppState {
   user: User | null;
   authLoaded: boolean;
   
+  // Koleksi Data
   incomes: Income[];
   expenses: Expense[];
   installments: Installment[];
   categories: Category[];
   paymentMethods: PaymentMethod[];
   appSettings: AppSettings | null;
+  financialAccounts: FinancialAccount[];
+  debtStatements: DebtStatement[];
+  transfers: Transfer[];
+  auditLogs: AuditLog[];
   
+  // Metrik Finansial Konsolidasi
   totalIncome: number;
+  economicExpense: number;
+  cashInflow: number;
+  cashOutflow: number;
+  netCashflow: number;
+  economicSurplus: number;
+  savingRate: number;
+  totalMonthlyInstallment: number;
+  totalDebtObligation: number;
+  totalOutstanding: number;
+  availableLiquidCash: number;
+  
+  // Metrik Legacy untuk kompatibilitas tampilan lama
   dailyExpenseTotal: number;
   installmentPaymentTotal: number;
   totalActualExpense: number;
   cashFlow: number;
-  savingRate: number;
-  totalMonthlyInstallment: number;
-  totalOutstanding: number;
+  debtRatio: number;
   
   // Actions
   initializeFirebaseListeners: () => void;
   
-  addIncome: (income: Omit<Income, 'id'>) => Promise<void>;
+  addIncome: (income: Omit<Income, 'id'>) => Promise<string>;
   updateIncome: (id: string, income: Partial<Income>) => Promise<void>;
   deleteIncome: (id: string) => Promise<void>;
   
-  addExpense: (expense: Omit<Expense, 'id'>) => Promise<void>;
+  addExpense: (expense: Omit<Expense, 'id'>) => Promise<string>;
   deleteExpense: (id: string) => Promise<void>;
   updateExpense: (id: string, expense: Partial<Expense>) => Promise<void>;
   
-  addInstallment: (installment: Omit<Installment, 'id'>) => Promise<void>;
+  addInstallment: (installment: Omit<Installment, 'id'>) => Promise<string>;
   deleteInstallment: (id: string) => Promise<void>;
   updateInstallment: (id: string, installment: Partial<Installment>) => Promise<void>;
   
@@ -123,25 +100,61 @@ interface AppState {
   deletePaymentMethod: (id: string) => Promise<void>;
   
   updateSettings: (id: string, settings: Partial<AppSettings>) => Promise<void>;
+
+  // Aksi Akun Keuangan & Tagihan
+  addFinancialAccount: (acc: Omit<FinancialAccount, 'id'>) => Promise<string>;
+  updateFinancialAccount: (id: string, acc: Partial<FinancialAccount>) => Promise<void>;
+  deleteFinancialAccount: (id: string) => Promise<void>;
+
+  addDebtStatement: (stmt: Omit<DebtStatement, 'id'>) => Promise<void>;
+  updateDebtStatement: (id: string, stmt: Partial<DebtStatement>) => Promise<void>;
+  deleteDebtStatement: (id: string) => Promise<void>;
+
+  // Aksi Domain Terpusat
+  payInstallment: (installment: Installment, paymentMethod: string, sourceAccountId?: string, amount?: number, notes?: string) => Promise<void>;
+  deleteExpenseWithReversal: (expense: Expense) => Promise<void>;
+  updateExpenseWithAdjustment: (id: string, oldExpense: Expense, updatedData: Partial<Expense>) => Promise<void>;
+  payDebtStatement: (statement: DebtStatement, paymentAmount: number, paymentMethod: string, sourceAccountId?: string) => Promise<void>;
+  transferFunds: (params: { fromAccountId: string; toAccountId: string; amount: number; date: string; fee?: number; description?: string }) => Promise<void>;
 }
 
 let unsubscribers: (() => void)[] = [];
 
 export const useAppStore = create<AppState>((set, get) => {
   
-  // Helper to recalculate summary whenever data changes
-  const recalcSummary = (incomes: Income[], expenses: Expense[], installments: Installment[]) => {
+  // Helper untuk menghitung ulang metrik setiap kali data berubah
+  const recalcSummary = (
+    incomes: Income[],
+    expenses: Expense[],
+    installments: Installment[],
+    accounts: FinancialAccount[],
+    statements: DebtStatement[]
+  ) => {
     const currentMonthStr = getFinancialPeriod(new Date());
-    const summary = calculateFinancialSummary(incomes, expenses, installments, currentMonthStr);
+    const summary = calculateFinancialSummary(incomes, expenses, installments, currentMonthStr, {
+      accounts,
+      statements
+    });
+
     set({
-      totalIncome: summary.totalIncome, 
-      dailyExpenseTotal: summary.dailyExpenseTotal, 
+      totalIncome: summary.totalIncome,
+      economicExpense: summary.economicExpense,
+      cashInflow: summary.cashInflow,
+      cashOutflow: summary.cashOutflow,
+      netCashflow: summary.netCashflow,
+      economicSurplus: summary.economicSurplus,
+      savingRate: summary.savingRate,
+      totalMonthlyInstallment: summary.loanInstallmentObligation,
+      totalDebtObligation: summary.totalDebtObligation,
+      totalOutstanding: summary.totalOutstandingDebt,
+      availableLiquidCash: summary.availableLiquidCash,
+
+      // Legacy aliases
+      dailyExpenseTotal: summary.dailyExpenseTotal,
       installmentPaymentTotal: summary.installmentPaymentTotal,
       totalActualExpense: summary.totalActualExpense,
       cashFlow: summary.cashFlow,
-      savingRate: summary.savingRate,
-      totalMonthlyInstallment: summary.totalMonthlyInstallment, 
-      totalOutstanding: summary.totalOutstanding
+      debtRatio: summary.debtRatio
     });
   };
 
@@ -155,25 +168,47 @@ export const useAppStore = create<AppState>((set, get) => {
     categories: [],
     paymentMethods: [],
     appSettings: null,
+    financialAccounts: [],
+    debtStatements: [],
+    transfers: [],
+    auditLogs: [],
     
     totalIncome: 0,
+    economicExpense: 0,
+    cashInflow: 0,
+    cashOutflow: 0,
+    netCashflow: 0,
+    economicSurplus: 0,
+    savingRate: 0,
+    totalMonthlyInstallment: 0,
+    totalDebtObligation: 0,
+    totalOutstanding: 0,
+    availableLiquidCash: 0,
+
     dailyExpenseTotal: 0,
     installmentPaymentTotal: 0,
     totalActualExpense: 0,
     cashFlow: 0,
-    savingRate: 0,
-    totalMonthlyInstallment: 0,
-    totalOutstanding: 0,
+    debtRatio: 0,
 
-    addIncome: async (income) => { await addDoc(collection(db, 'incomes'), income); },
+    addIncome: async (income) => {
+      const ref = await addDoc(collection(db, 'incomes'), income);
+      return ref.id;
+    },
     updateIncome: async (id, income) => { await updateDoc(doc(db, 'incomes', id), income); },
     deleteIncome: async (id) => { await deleteDoc(doc(db, 'incomes', id)); },
     
-    addExpense: async (expense) => { await addDoc(collection(db, 'expenses'), expense); },
+    addExpense: async (expense) => {
+      const ref = await addDoc(collection(db, 'expenses'), expense);
+      return ref.id;
+    },
     deleteExpense: async (id) => { await deleteDoc(doc(db, 'expenses', id)); },
     updateExpense: async (id, expense) => { await updateDoc(doc(db, 'expenses', id), expense); },
     
-    addInstallment: async (inst) => { await addDoc(collection(db, 'installments'), inst); },
+    addInstallment: async (inst) => {
+      const ref = await addDoc(collection(db, 'installments'), inst);
+      return ref.id;
+    },
     deleteInstallment: async (id) => { await deleteDoc(doc(db, 'installments', id)); },
     updateInstallment: async (id, inst) => { await updateDoc(doc(db, 'installments', id), inst); },
     
@@ -187,44 +222,109 @@ export const useAppStore = create<AppState>((set, get) => {
     
     updateSettings: async (id, settings) => { await updateDoc(doc(db, 'appSettings', id), settings); },
 
+    addFinancialAccount: async (acc) => {
+      const ref = await addDoc(collection(db, 'financialAccounts'), acc);
+      return ref.id;
+    },
+    updateFinancialAccount: async (id, acc) => { await updateDoc(doc(db, 'financialAccounts', id), acc); },
+    deleteFinancialAccount: async (id) => { await deleteDoc(doc(db, 'financialAccounts', id)); },
+
+    addDebtStatement: async (stmt) => { await addDoc(collection(db, 'debtStatements'), stmt); },
+    updateDebtStatement: async (id, stmt) => { await updateDoc(doc(db, 'debtStatements', id), stmt); },
+    deleteDebtStatement: async (id) => { await deleteDoc(doc(db, 'debtStatements', id)); },
+
+    // Aksi Terpusat dengan Perlindungan Reversal
+    payInstallment: async (installment, paymentMethod, sourceAccountId, amount, notes) => {
+      await financialService.payInstallment({
+        installment,
+        paymentMethod,
+        sourceAccountId,
+        amount,
+        notes,
+        userEmail: get().user?.email || undefined
+      });
+    },
+
+    deleteExpenseWithReversal: async (expense) => {
+      await financialService.deleteExpenseWithRollback(
+        expense,
+        get().installments,
+        get().user?.email || undefined
+      );
+    },
+
+    updateExpenseWithAdjustment: async (id, oldExpense, updatedData) => {
+      await financialService.updateExpenseWithAdjustment({
+        expenseId: id,
+        oldExpense,
+        updatedData,
+        installments: get().installments,
+        userEmail: get().user?.email || undefined
+      });
+    },
+
+    payDebtStatement: async (statement, paymentAmount, paymentMethod, sourceAccountId) => {
+      await financialService.recordBillSettlement({
+        statement,
+        paymentAmount,
+        paymentMethod,
+        sourceAccountId,
+        userEmail: get().user?.email || undefined
+      });
+    },
+
+    transferFunds: async (params) => {
+      await financialService.recordTransfer({
+        ...params,
+        userEmail: get().user?.email || undefined
+      });
+    },
+
     initializeFirebaseListeners: () => {
-      // Clear previous listeners if any
       unsubscribers.forEach(unsub => unsub());
       unsubscribers = [];
 
+      // 1. Incomes
       const unsubIncomes = onSnapshot(collection(db, 'incomes'), (snapshot) => {
         const incomes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Income));
         set({ incomes });
-        recalcSummary(incomes, get().expenses, get().installments);
+        recalcSummary(incomes, get().expenses, get().installments, get().financialAccounts, get().debtStatements);
       });
       
+      // 2. Expenses
       const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
         const expenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense));
         set({ expenses });
-        recalcSummary(get().incomes, expenses, get().installments);
+        recalcSummary(get().incomes, expenses, get().installments, get().financialAccounts, get().debtStatements);
       });
       
+      // 3. Installments
       const unsubInstallments = onSnapshot(collection(db, 'installments'), (snapshot) => {
         const installments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Installment));
         set({ installments });
-        recalcSummary(get().incomes, get().expenses, installments);
+        recalcSummary(get().incomes, get().expenses, installments, get().financialAccounts, get().debtStatements);
       });
       
+      // 4. Categories
       const unsubCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
         const categories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
-        // Sort categories safely handling undefined orders
         categories.sort((a, b) => (a.order || 0) - (b.order || 0));
         
-        // Auto seed default categories if entirely empty
         if (categories.length === 0) {
           const defaultCategories: Omit<Category, 'id'>[] = [
             { name: 'Gaji', type: 'income', isActive: 1, order: 1 },
-            { name: 'Bonus', type: 'income', isActive: 1, order: 2 },
+            { name: 'Bonus & THR', type: 'income', isActive: 1, order: 2 },
+            { name: 'Investasi & Dividen', type: 'income', isActive: 1, order: 3 },
             { name: 'Makanan & Minuman', type: 'expense', isActive: 1, order: 1 },
             { name: 'Transportasi', type: 'expense', isActive: 1, order: 2 },
             { name: 'Tagihan & Utilitas', type: 'expense', isActive: 1, order: 3 },
+            { name: 'Kesehatan', type: 'expense', isActive: 1, order: 4 },
+            { name: 'Belanja Rumah Tangga', type: 'expense', isActive: 1, order: 5 },
+            { name: 'Biaya Admin & Transaksi', type: 'expense', isActive: 1, order: 6 },
+            { name: 'Pembayaran Tagihan CC/SPaylater', type: 'expense', isActive: 1, order: 7 },
             { name: 'KPR', type: 'installment', isActive: 1, order: 1 },
-            { name: 'Kartu Kredit', type: 'installment', isActive: 1, order: 2 }
+            { name: 'Kartu Kredit', type: 'installment', isActive: 1, order: 2 },
+            { name: 'PayLater', type: 'installment', isActive: 1, order: 3 }
           ];
           defaultCategories.forEach(cat => addDoc(collection(db, 'categories'), cat));
         } else {
@@ -232,15 +332,17 @@ export const useAppStore = create<AppState>((set, get) => {
         }
       });
       
+      // 5. Payment Methods
       const unsubPaymentMethods = onSnapshot(collection(db, 'paymentMethods'), (snapshot) => {
         const paymentMethods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentMethod));
         paymentMethods.sort((a, b) => (a.order || 0) - (b.order || 0));
         
         if (paymentMethods.length === 0) {
           const defaultPMs: Omit<PaymentMethod, 'id'>[] = [
-            { name: 'Cash', isActive: 1, order: 1 },
-            { name: 'Transfer Bank', isActive: 1, order: 2 },
-            { name: 'Kartu Kredit', isActive: 1, order: 3 }
+            { name: 'Cash / Tunai', isActive: 1, order: 1, account_type: 'Cash' },
+            { name: 'Transfer Bank BCA', isActive: 1, order: 2, account_type: 'Bank' },
+            { name: 'Kartu Kredit', isActive: 1, order: 3, account_type: 'Credit Card' },
+            { name: 'ShopeePay / E-Wallet', isActive: 1, order: 4, account_type: 'E-Wallet' }
           ];
           defaultPMs.forEach(pm => addDoc(collection(db, 'paymentMethods'), pm));
         } else {
@@ -248,12 +350,12 @@ export const useAppStore = create<AppState>((set, get) => {
         }
       });
       
+      // 6. Settings
       const unsubSettings = onSnapshot(collection(db, 'appSettings'), (snapshot) => {
         if (!snapshot.empty) {
           const appSettings = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as AppSettings;
           set({ appSettings });
         } else {
-          // Create default settings if empty
           const defaultSettings: Omit<AppSettings, 'id'> = {
             familyName: 'Keluarga',
             husbandName: 'Suami',
@@ -267,7 +369,48 @@ export const useAppStore = create<AppState>((set, get) => {
         }
       });
 
-      unsubscribers.push(unsubIncomes, unsubExpenses, unsubInstallments, unsubCategories, unsubPaymentMethods, unsubSettings);
+      // 7. Financial Accounts
+      const unsubAccounts = onSnapshot(collection(db, 'financialAccounts'), (snapshot) => {
+        const financialAccounts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinancialAccount));
+        
+        // Auto-seed default accounts jika belum ada sama sekali
+        if (financialAccounts.length === 0) {
+          const defaultAccounts: Omit<FinancialAccount, 'id'>[] = [
+            { name: 'Dompet Tunai', type: 'Cash', owner: 'Bersama', currency: 'IDR', opening_balance: 0, current_balance: 0, isActive: 1, timestamp: Date.now() },
+            { name: 'Rekening Bank Utama', type: 'Bank', owner: 'Bersama', currency: 'IDR', opening_balance: 0, current_balance: 0, isActive: 1, timestamp: Date.now() },
+            { name: 'Kartu Kredit Utama', type: 'Credit Card', owner: 'Bersama', currency: 'IDR', opening_balance: 0, current_balance: 0, credit_limit: 10000000, isActive: 1, timestamp: Date.now() }
+          ];
+          defaultAccounts.forEach(acc => addDoc(collection(db, 'financialAccounts'), acc));
+        } else {
+          set({ financialAccounts });
+          recalcSummary(get().incomes, get().expenses, get().installments, financialAccounts, get().debtStatements);
+        }
+      });
+
+      // 8. Debt Statements
+      const unsubStatements = onSnapshot(collection(db, 'debtStatements'), (snapshot) => {
+        const debtStatements = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtStatement));
+        set({ debtStatements });
+        recalcSummary(get().incomes, get().expenses, get().installments, get().financialAccounts, debtStatements);
+      });
+
+      // 9. Transfers
+      const unsubTransfers = onSnapshot(collection(db, 'transfers'), (snapshot) => {
+        const transfers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transfer));
+        set({ transfers });
+      });
+
+      unsubscribers.push(
+        unsubIncomes,
+        unsubExpenses,
+        unsubInstallments,
+        unsubCategories,
+        unsubPaymentMethods,
+        unsubSettings,
+        unsubAccounts,
+        unsubStatements,
+        unsubTransfers
+      );
     }
   };
 });
@@ -278,7 +421,6 @@ onAuthStateChanged(auth, (user) => {
   if (user) {
     useAppStore.getState().initializeFirebaseListeners();
   } else {
-    // Unsubscribe when logged out
     unsubscribers.forEach(unsub => unsub());
     unsubscribers = [];
   }
