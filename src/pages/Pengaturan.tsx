@@ -159,31 +159,53 @@ const Pengaturan = () => {
     e.preventDefault();
     if (!newAccount.name.trim()) return;
 
-    await addFinancialAccount({
-      name: newAccount.name.trim(),
-      type: newAccount.type,
-      owner: newAccount.owner,
-      currency: 'IDR',
-      opening_balance: Number(newAccount.current_balance) || 0,
-      current_balance: Number(newAccount.current_balance) || 0,
-      credit_limit: newAccount.credit_limit ? Number(newAccount.credit_limit) : undefined,
-      isActive: 1,
-      timestamp: Date.now()
-    });
+    try {
+      const accountName = newAccount.name.trim();
+      await addFinancialAccount({
+        name: accountName,
+        type: newAccount.type,
+        owner: newAccount.owner,
+        currency: 'IDR',
+        opening_balance: Number(newAccount.current_balance) || 0,
+        current_balance: Number(newAccount.current_balance) || 0,
+        credit_limit: newAccount.credit_limit ? Number(newAccount.credit_limit) : undefined,
+        isActive: 1,
+        timestamp: Date.now()
+      });
 
-    setNewAccount({
-      name: '',
-      type: 'Bank',
-      owner: 'Bersama',
-      current_balance: '',
-      credit_limit: ''
-    });
+      alert(`✓ Akun "${accountName}" berhasil ditambahkan!`);
+
+      setNewAccount({
+        name: '',
+        type: 'Bank',
+        owner: 'Bersama',
+        current_balance: '',
+        credit_limit: ''
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert(`Gagal menambahkan akun: ${err.message || 'Error tidak diketahui'}`);
+    }
   };
 
   const handleEditAccountBalance = async (acc: FinancialAccount) => {
     const input = window.prompt(`Update saldo saat ini untuk "${acc.name}" (Rp):`, acc.current_balance.toString());
-    if (input !== null && !isNaN(Number(input))) {
-      await updateFinancialAccount(acc.id, { current_balance: Number(input) });
+    if (input !== null) {
+      const cleanInput = input.replace(/[^0-9.-]/g, '');
+      const newBalance = Number(cleanInput);
+
+      if (isNaN(newBalance)) {
+        alert('Nominal yang dimasukkan tidak valid. Harap masukkan angka yang benar.');
+        return;
+      }
+
+      try {
+        await updateFinancialAccount(acc.id, { current_balance: newBalance });
+        alert(`✓ Sukses! Saldo "${acc.name}" berhasil diperbarui menjadi ${formatCurrency(newBalance)}.`);
+      } catch (err: any) {
+        console.error(err);
+        alert(`Gagal memperbarui saldo: ${err.message || 'Periksa koneksi atau izin akses'}`);
+      }
     }
   };
 
