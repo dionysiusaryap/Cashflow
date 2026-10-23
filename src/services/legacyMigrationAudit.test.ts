@@ -168,4 +168,22 @@ describe('Audit Migrasi Data Legacy & Backup/Restore Aktual', () => {
     expect(summary.availableLiquidCash).toBe(15850000);
     expect(accountBCA.current_balance).toBe(15850000);
   });
+
+  it('6. Transaksi berulang sah pada tanggal yang sama (BBM Motor & Listrik) tidak terhapus sebagai duplikat', () => {
+    const rawData = fs.readFileSync(legacyBackupPath, 'utf-8');
+    const backupJson = JSON.parse(rawData);
+
+    // Filter transaksi BBM Motor dari backup riil
+    const bbmMotorReceipts = backupJson.expenses.filter((e: any) => e.description === 'BBM Motor');
+    expect(bbmMotorReceipts.length).toBe(3); // Ada 3 transaksi sah BBM Motor Rp30.000 pada tanggal yang sama
+
+    const plan = prepareBackupImport(
+      { expenses: bbmMotorReceipts },
+      { incomes: [], expenses: [], installments: [], financialAccounts: [] }
+    );
+
+    // Ketiga transaksi sah BBM Motor tersebut harus tetap ada di antrean impor (tidak di-drop)
+    expect(plan.expenses.length).toBe(3);
+    expect(plan.duplicatesCount).toBe(0);
+  });
 });

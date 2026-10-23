@@ -23,7 +23,7 @@ service cloud.firestore {
     }
 
     function isValidOwner(val) {
-      return val in ['Suami', 'Istri', 'Bersama'];
+      return val == null || val in ['Suami', 'Istri', 'Bersama'];
     }
 
     // ============================================================
