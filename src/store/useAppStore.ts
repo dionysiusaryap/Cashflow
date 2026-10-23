@@ -224,10 +224,30 @@ export const useAppStore = create<AppState>((set, get) => {
 
     addFinancialAccount: async (acc) => {
       const ref = await addDoc(collection(db, 'financialAccounts'), acc);
+      set((state) => {
+        const newAcc = { ...acc, id: ref.id };
+        const updated = [...state.financialAccounts.filter(a => a.id !== ref.id), newAcc];
+        recalcSummary(state.incomes, state.expenses, state.installments, updated, state.debtStatements);
+        return { financialAccounts: updated };
+      });
       return ref.id;
     },
-    updateFinancialAccount: async (id, acc) => { await updateDoc(doc(db, 'financialAccounts', id), acc); },
-    deleteFinancialAccount: async (id) => { await deleteDoc(doc(db, 'financialAccounts', id)); },
+    updateFinancialAccount: async (id, acc) => {
+      set((state) => {
+        const updated = state.financialAccounts.map((a) => (a.id === id ? { ...a, ...acc } : a));
+        recalcSummary(state.incomes, state.expenses, state.installments, updated, state.debtStatements);
+        return { financialAccounts: updated };
+      });
+      await updateDoc(doc(db, 'financialAccounts', id), acc);
+    },
+    deleteFinancialAccount: async (id) => {
+      set((state) => {
+        const updated = state.financialAccounts.filter((a) => a.id !== id);
+        recalcSummary(state.incomes, state.expenses, state.installments, updated, state.debtStatements);
+        return { financialAccounts: updated };
+      });
+      await deleteDoc(doc(db, 'financialAccounts', id));
+    },
 
     addDebtStatement: async (stmt) => { await addDoc(collection(db, 'debtStatements'), stmt); },
     updateDebtStatement: async (id, stmt) => { await updateDoc(doc(db, 'debtStatements', id), stmt); },
@@ -286,28 +306,28 @@ export const useAppStore = create<AppState>((set, get) => {
 
       // 1. Incomes
       const unsubIncomes = onSnapshot(collection(db, 'incomes'), (snapshot) => {
-        const incomes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Income));
+        const incomes = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Income));
         set({ incomes });
         recalcSummary(incomes, get().expenses, get().installments, get().financialAccounts, get().debtStatements);
       });
       
       // 2. Expenses
       const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
-        const expenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense));
+        const expenses = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Expense));
         set({ expenses });
         recalcSummary(get().incomes, expenses, get().installments, get().financialAccounts, get().debtStatements);
       });
       
       // 3. Installments
       const unsubInstallments = onSnapshot(collection(db, 'installments'), (snapshot) => {
-        const installments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Installment));
+        const installments = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Installment));
         set({ installments });
         recalcSummary(get().incomes, get().expenses, installments, get().financialAccounts, get().debtStatements);
       });
       
       // 4. Categories
       const unsubCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
-        const categories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+        const categories = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Category));
         categories.sort((a, b) => (a.order || 0) - (b.order || 0));
         
         if (categories.length === 0) {
@@ -334,7 +354,7 @@ export const useAppStore = create<AppState>((set, get) => {
       
       // 5. Payment Methods
       const unsubPaymentMethods = onSnapshot(collection(db, 'paymentMethods'), (snapshot) => {
-        const paymentMethods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentMethod));
+        const paymentMethods = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as PaymentMethod));
         paymentMethods.sort((a, b) => (a.order || 0) - (b.order || 0));
         
         if (paymentMethods.length === 0) {
@@ -353,7 +373,7 @@ export const useAppStore = create<AppState>((set, get) => {
       // 6. Settings
       const unsubSettings = onSnapshot(collection(db, 'appSettings'), (snapshot) => {
         if (!snapshot.empty) {
-          const appSettings = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as AppSettings;
+          const appSettings = { ...snapshot.docs[0].data(), id: snapshot.docs[0].id } as AppSettings;
           set({ appSettings });
         } else {
           const defaultSettings: Omit<AppSettings, 'id'> = {
@@ -371,7 +391,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
       // 7. Financial Accounts
       const unsubAccounts = onSnapshot(collection(db, 'financialAccounts'), (snapshot) => {
-        const financialAccounts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinancialAccount));
+        const financialAccounts = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FinancialAccount));
         
         // Auto-seed default accounts jika belum ada sama sekali
         if (financialAccounts.length === 0) {
@@ -381,6 +401,7 @@ export const useAppStore = create<AppState>((set, get) => {
             { name: 'Kartu Kredit Utama', type: 'Credit Card', owner: 'Bersama', currency: 'IDR', opening_balance: 0, current_balance: 0, credit_limit: 10000000, isActive: 1, timestamp: Date.now() }
           ];
           defaultAccounts.forEach(acc => addDoc(collection(db, 'financialAccounts'), acc));
+          set({ financialAccounts: defaultAccounts.map((a, idx) => ({ ...a, id: `seed-${idx}` })) });
         } else {
           set({ financialAccounts });
           recalcSummary(get().incomes, get().expenses, get().installments, financialAccounts, get().debtStatements);
@@ -389,14 +410,14 @@ export const useAppStore = create<AppState>((set, get) => {
 
       // 8. Debt Statements
       const unsubStatements = onSnapshot(collection(db, 'debtStatements'), (snapshot) => {
-        const debtStatements = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtStatement));
+        const debtStatements = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as DebtStatement));
         set({ debtStatements });
         recalcSummary(get().incomes, get().expenses, get().installments, get().financialAccounts, debtStatements);
       });
 
       // 9. Transfers
       const unsubTransfers = onSnapshot(collection(db, 'transfers'), (snapshot) => {
-        const transfers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transfer));
+        const transfers = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Transfer));
         set({ transfers });
       });
 

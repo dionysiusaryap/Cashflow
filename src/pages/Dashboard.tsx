@@ -107,9 +107,12 @@ const Dashboard = () => {
   const recurringExpenses = validDailyExpenses.filter(e => e.date === 'Semua Bulan' && !installmentCategories.has(e.payment_method || ''));
   const totalRecurring = recurringExpenses.reduce((sum, e) => sum + e.amount, 0);
 
-  // Proyeksi Kas 30 Hari
   const liquidCash = financialAccounts
-    .filter(a => a.isActive === 1 && (a.type === 'Cash' || a.type === 'Bank' || a.type === 'E-Wallet'))
+    .filter(a => a.isActive !== 0 && (
+      a.type?.toLowerCase() === 'cash' || 
+      a.type?.toLowerCase() === 'bank' || 
+      a.type?.toLowerCase() === 'e-wallet'
+    ))
     .reduce((sum, a) => sum + (Number(a.current_balance) || 0), 0);
 
   const confirmedIncome = incomes
@@ -233,11 +236,11 @@ const Dashboard = () => {
       {/* Baris 2: Saldo Kas, Sisa Utang, Tagihan Mendatang, & Proyeksi */}
       <div className="grid grid-cols-4 mb-6">
         <div className="card" style={{ padding: '1rem', borderLeft: '4px solid var(--success-color)' }}>
-          <div className="text-secondary" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Saldo Kas & Bank Likuid</div>
+          <div className="text-secondary" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Kas Likuid Tersedia (Saldo Bank & Kas)</div>
           <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '0.25rem' }}>
             {formatCurrency(summary.availableLiquidCash || liquidCash)}
           </div>
-          <div className="text-secondary" style={{ fontSize: '0.7rem' }}>Aset tunai & rekening bank</div>
+          <div className="text-secondary" style={{ fontSize: '0.7rem' }}>Aset tunai & rekening bank aktif</div>
         </div>
 
         <div className="card" style={{ padding: '1rem', borderLeft: '4px solid var(--warning-color)' }}>

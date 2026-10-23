@@ -156,7 +156,11 @@ export const calculateFinancialSummary = (
   let availableLiquidCash = 0;
   if (options?.accounts) {
     availableLiquidCash = options.accounts
-      .filter(a => a.isActive === 1 && (a.type === 'Cash' || a.type === 'Bank' || a.type === 'E-Wallet'))
+      .filter(a => a.isActive !== 0 && (
+        a.type?.toLowerCase() === 'cash' || 
+        a.type?.toLowerCase() === 'bank' || 
+        a.type?.toLowerCase() === 'e-wallet'
+      ))
       .reduce((sum, a) => sum + (Number(a.current_balance) || 0), 0);
   }
 
